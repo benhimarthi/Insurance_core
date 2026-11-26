@@ -1,0 +1,8 @@
+{
+  "_note": "DEMO tenant. Branding and legal text are placeholders.",
+  "tenantId": "demo-insurer",
+  "name": "Demo Assurance",
+  "demo": true,
+  "verifyBaseUrl": "https://demo.example/verify",
+  "legalMention": "Document de démonstration généré automatiquement. Il n’a aucune valeur contractuelle et ne constitue pas une attestation d’assurance réelle."
+}

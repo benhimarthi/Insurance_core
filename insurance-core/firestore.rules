@@ -1,0 +1,60 @@
+rules_version = '2';
+
+// All writes go through Cloud Functions (the Admin SDK bypasses these rules): clients get no write access.
+//
+// Reading follows the role the person has AT THAT INSURER, stored in tenants/{t}/members/{uid}
+// (live, so revoking a member takes effect immediately). Keep the role lists in sync with
+// src/auth/roles.js. Platform staff have no case access here: to read customer data they must
+// first add themselves as a member through the audited `members` callable.
+//
+// MFA: staff roles require a second factor (sign_in_second_factor). For early demos without
+// Identity Platform / MFA you can make mfaOk() return true, and set the REQUIRE_MFA param to false.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function memberPath(tenantId) {
+      return /databases/$(database)/documents/tenants/$(tenantId)/members/$(request.auth.uid);
+    }
+    function mfaOk() {
+      return 'sign_in_second_factor' in request.auth.token.firebase;
+    }
+    function hasRole(tenantId, roles) {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && mfaOk()
+        && exists(memberPath(tenantId))
+        && get(memberPath(tenantId)).data.status == 'active'
+        && get(memberPath(tenantId)).data.role in roles;
+    }
+    function canReadCases(tenantId) {
+      return hasRole(tenantId, ['tenant_admin', 'underwriter', 'underwriting_manager', 'auditor']);
+    }
+
+    match /tenants/{tenantId} {
+      allow read: if canReadCases(tenantId);
+
+      match /cases/{caseId} {
+        allow read: if canReadCases(tenantId);
+        match /events/{eventId} {
+          allow read: if hasRole(tenantId, ['tenant_admin', 'underwriter', 'underwriting_manager', 'auditor']);
+        }
+      }
+      match /policies/{policyNumber} { allow read: if canReadCases(tenantId); }
+      match /configs/{configId} { allow read: if canReadCases(tenantId); }
+
+      match /members/{uid} {
+        allow read: if request.auth != null && request.auth.uid == uid
+                    || hasRole(tenantId, ['tenant_admin', 'auditor']);
+      }
+      match /authEvents/{eventId} { allow read: if hasRole(tenantId, ['tenant_admin', 'auditor']); }
+      // invitations hold secret hashes and customers hold contact details: no client access
+    }
+
+    // a signed-in user can list the insurers they belong to
+    match /userTenants/{uid}/memberships/{tenantId} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+    }
+
+    match /{document=**} { allow read, write: if false; }
+  }
+}

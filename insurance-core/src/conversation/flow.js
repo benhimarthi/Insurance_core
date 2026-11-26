@@ -1,0 +1,246 @@
+'use strict';
+
+const { evaluateCase } = require('../rules/engine');
+const { CASE_STATUS, ACTOR, EVENT, newEvent, caseStatusFromEngine } = require('../models/schemas');
+const { QUESTIONS, getPath, setPath, validateValue, formatQuestion } = require('./questions');
+const { MESSAGES, DOC, PAY, t, quoteMessage } = require('./messages');
+const { finalPremium } = require('../policy/policy');
+const { requestPayment } = require('../policy/lifecycle');
+const { labelOf, requiredTypes, missingTypes, acceptDocument, crossCheck } = require('../documents/documents');
+const { detectLanguage, parseBoolean, wantsHuman } = require('./nlu');
+
+/**
+ * Channel-agnostic conversation flow (WhatsApp, web chat, anything).
+ *
+ *   handleMessage({ caseDoc, message, attachments, config, extractor, documentProcessor, paymentAdapter, now })
+ *     -> { caseDoc, replies, events }
+ *
+ * It never touches Firestore or a messaging API: the caller persists caseDoc, appends events
+ * to the audit trail and sends replies. That keeps the flow testable and channel-independent.
+ *
+ * Stages: new -> asking -> documents (if config.documents) -> quoted | review | closed ;
+ *         handoff at any point ; quoted -> payment (if paymentAdapter) | confirmed | closed ;
+ *         payment -> issued (see src/policy/lifecycle.js)
+ */
+
+const MAX_RETRIES = 3;
+const SYSTEM = { kind: ACTOR.SYSTEM, id: 'conversation-flow' };
+
+const nextQuestion = (input) => QUESTIONS.find((q) => getPath(input, q.path) == null);
+
+function finish(c, replies, events) {
+  c.updatedAt = new Date().toISOString();
+  return { caseDoc: c, replies, events };
+}
+
+function handoff(c, reason, lang, replies, events) {
+  c.status = CASE_STATUS.PENDING_REVIEW;
+  c.flow = { stage: 'handoff', pending: null, retries: 0 };
+  c.handoff = { reason };
+  events.push(newEvent({ type: EVENT.REFERRED, actor: SYSTEM, payload: { reason } }));
+  replies.push(t(MESSAGES.handoff, lang));
+  return finish(c, replies, events);
+}
+
+function runEngine(c, config, lang, replies, events) {
+  // documentConfidence comes from the document module; defaults to 1 until it exists
+  const data = { ...c.input, documentConfidence: c.documentConfidence ?? 1, documentFlags: c.documentFlags || [] };
+  const result = evaluateCase(data, config);
+  c.engineResult = result;
+  c.status = caseStatusFromEngine(result.status, config);
+  c.flow = { stage: 'review', pending: null, retries: 0 };
+
+  events.push(newEvent({
+    type: EVENT.ENGINE_EVALUATED,
+    actor: { kind: ACTOR.SYSTEM, id: 'rules-engine' },
+    payload: {
+      status: result.status,
+      riskScore: result.riskScore,
+      riskBand: result.riskBand,
+      confidence: result.confidence,
+      premium: result.premium ? result.premium.total : null,
+      reasonCodes: result.reasons.map((r) => r.code),
+      configVersion: result.configVersion,
+    },
+  }));
+
+  switch (c.status) {
+    case CASE_STATUS.QUOTED:
+      c.flow.stage = 'quoted';
+      replies.push(quoteMessage(lang, result.premium.total, result.currency));
+      break;
+    case CASE_STATUS.PENDING_REVIEW:
+      events.push(newEvent({ type: EVENT.REFERRED, actor: SYSTEM, payload: { reason: 'engine_' + result.status } }));
+      replies.push(t(MESSAGES.review, lang)); // no price, no reasons: a human decides first
+      break;
+    case CASE_STATUS.DECLINED:
+      c.flow.stage = 'closed';
+      replies.push(t(MESSAGES.declined, lang));
+      break;
+    default:
+      return handoff(c, 'engine_' + result.status, lang, replies, events);
+  }
+  return finish(c, replies, events);
+}
+
+function afterQuestions(c, config, lang, replies, events) {
+  const required = requiredTypes(config);
+  if (!required.length) return runEngine(c, config, lang, replies, events);
+  c.flow = { stage: 'documents', pending: null, retries: 0, docRetries: 0 };
+  replies.push(DOC.request(lang, required.map((type) => labelOf(type, lang))));
+  return finish(c, replies, events);
+}
+
+async function handleMessage({ caseDoc, message = '', attachments = [], config, extractor, documentProcessor, paymentAdapter, now = new Date() }) {
+  const c = structuredClone(caseDoc);
+  c.flow = c.flow || { stage: 'new', pending: null, retries: 0 };
+  c.input = c.input || { driver: {}, vehicle: {}, location: {} };
+  const replies = [];
+  const events = [];
+
+  // Stage: new. Detect the language and start asking.
+  if (c.flow.stage === 'new') {
+    c.language = c.language || detectLanguage(message);
+    const q = nextQuestion(c.input);
+    c.flow = { stage: 'asking', pending: q.path, retries: 0 };
+    replies.push(t(MESSAGES.intro, c.language), formatQuestion(q, c.language));
+    return finish(c, replies, events);
+  }
+
+  const lang = c.language || 'fr';
+
+  // A customer can ask for a human at any point.
+  if (!['handoff', 'closed'].includes(c.flow.stage) && wantsHuman(message)) {
+    return handoff(c, 'customer_requested_human', lang, replies, events);
+  }
+
+  switch (c.flow.stage) {
+    case 'asking': {
+      const q = QUESTIONS.find((x) => x.path === c.flow.pending);
+      const { fields } = await extractor.extract({ message, language: lang, question: q, questions: QUESTIONS });
+
+      const applied = {};
+      for (const [path, raw] of Object.entries(fields || {})) {
+        const def = QUESTIONS.find((x) => x.path === path);
+        if (!def) continue; // ignore unknown fields
+        if (path !== q.path && getPath(c.input, path) != null) continue; // no silent overwrites
+        const check = validateValue(def, raw);
+        if (!check.ok) continue; // never trust extractor output
+        setPath(c.input, path, check.value);
+        applied[path] = check.value;
+        if (def.derive) {
+          const derived = def.derive(check.value, config);
+          setPath(c.input, def.derives, derived);
+          applied[def.derives] = derived;
+        }
+      }
+
+      if (getPath(c.input, q.path) == null) {
+        c.flow.retries += 1;
+        if (c.flow.retries >= MAX_RETRIES) return handoff(c, 'conversation_stuck', lang, replies, events);
+        replies.push(t(MESSAGES.retry, lang), formatQuestion(q, lang));
+        return finish(c, replies, events);
+      }
+
+      events.push(newEvent({ type: EVENT.INPUT_UPDATED, actor: { kind: ACTOR.CUSTOMER, id: c.customerId || 'customer' }, payload: { fields: applied } }));
+      c.flow.retries = 0;
+
+      const nq = nextQuestion(c.input);
+      if (nq) {
+        c.flow.pending = nq.path;
+        replies.push(formatQuestion(nq, lang));
+        return finish(c, replies, events);
+      }
+      return afterQuestions(c, config, lang, replies, events);
+    }
+
+    case 'documents': {
+      if (!documentProcessor) throw new Error('documentProcessor is required when config.documents is set');
+      const customer = { kind: ACTOR.CUSTOMER, id: c.customerId || 'customer' };
+      const processor = { kind: ACTOR.AI, id: 'document-processor' };
+      const labels = (types) => types.map((type) => labelOf(type, lang));
+      c.documents = c.documents || {};
+
+      if (!attachments.length) {
+        replies.push(DOC.request(lang, labels(missingTypes(c, config))));
+        return finish(c, replies, events);
+      }
+
+      let hadIssue = false;
+      for (const attachment of attachments) {
+        const missing = missingTypes(c, config);
+        const extracted = await documentProcessor.process({ attachment, expectedTypes: missing, language: lang });
+        const res = acceptDocument(extracted, config, now);
+
+        if (!res.ok) {
+          hadIssue = true;
+          c.flow.docRetries = (c.flow.docRetries || 0) + 1;
+          // audit: codes and confidence only, never extracted values
+          events.push(newEvent({ type: EVENT.DOCUMENT_EXTRACTED, actor: processor, payload: { docType: res.type, accepted: false, issue: res.issue, confidence: res.confidence } }));
+          if (c.flow.docRetries >= (config.documents.maxResubmits || 3)) return handoff(c, 'documents_failed', lang, replies, events);
+          replies.push(res.issue === 'WRONG_TYPE'
+            ? DOC.WRONG_TYPE(lang, labels(missing))
+            : DOC[res.issue](lang, labelOf(res.type, lang)));
+          continue;
+        }
+
+        c.documents[res.type] = { fields: res.fields, confidence: res.confidence, receivedAt: now.toISOString(), source: attachment.storagePath || null };
+        events.push(newEvent({ type: EVENT.DOCUMENT_EXTRACTED, actor: processor, payload: { docType: res.type, accepted: true, confidence: res.confidence } }));
+        replies.push(DOC.received(lang, labelOf(res.type, lang)));
+      }
+
+      const stillMissing = missingTypes(c, config);
+      if (stillMissing.length) {
+        if (!hadIssue) replies.push(DOC.remaining(lang, labels(stillMissing)));
+        return finish(c, replies, events);
+      }
+
+      // All documents accepted: cross-check against the declared answers, then run the engine.
+      c.documentFlags = crossCheck(c.input, c.documents, config, now);
+      c.documentConfidence = Math.min(...requiredTypes(config).map((type) => c.documents[type].confidence));
+      events.push(newEvent({ type: EVENT.DOCUMENT_EXTRACTED, actor: SYSTEM, payload: { crossCheck: true, flagCodes: c.documentFlags.map((f) => f.code), documentConfidence: c.documentConfidence } }));
+      return runEngine(c, config, lang, replies, events);
+    }
+
+    case 'quoted': {
+      const answer = parseBoolean(message);
+      const customer = { kind: ACTOR.CUSTOMER, id: c.customerId || 'customer' };
+      if (answer === true) {
+        c.flow.stage = 'confirmed';
+        events.push(newEvent({ type: EVENT.QUOTE_ACCEPTED, actor: customer, payload: { premium: finalPremium(c) } }));
+        if (!paymentAdapter) {
+          replies.push(t(MESSAGES.confirmed, lang));
+          return finish(c, replies, events);
+        }
+        const paid = await requestPayment({ caseDoc: c, config, paymentAdapter, now });
+        return finish(paid.caseDoc, [...replies, ...paid.replies], [...events, ...paid.events]);
+      }
+      if (answer === false) {
+        c.flow.stage = 'closed';
+        events.push(newEvent({ type: EVENT.QUOTE_DECLINED_BY_CUSTOMER, actor: customer, payload: {} }));
+        replies.push(t(MESSAGES.closed, lang));
+      } else {
+        replies.push(t(MESSAGES.quotedReprompt, lang));
+      }
+      return finish(c, replies, events);
+    }
+
+    case 'payment':
+      replies.push(PAY.link(lang, c.payment.url, c.payment.amount, c.payment.currency));
+      return finish(c, replies, events);
+
+    case 'issued':
+      replies.push(PAY.issued(lang));
+      return finish(c, replies, events);
+
+    case 'closed':
+      replies.push(t(MESSAGES.closed, lang));
+      return finish(c, replies, events);
+
+    default: // review, handoff, confirmed
+      replies.push(t(MESSAGES.waiting, lang));
+      return finish(c, replies, events);
+  }
+}
+
+module.exports = { handleMessage, nextQuestion };

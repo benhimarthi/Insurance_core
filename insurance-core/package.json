@@ -1,0 +1,25 @@
+{
+  "name": "insurance-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Generic AI underwriting assistant core: rules engine, conversation flow, documents, payment and policy issuance",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "sample": "node examples/make-sample-policy.js",
+    "seed": "node scripts/seed-demo-tenant.js"
+  },
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.5.1",
+    "firebase-functions": "^7.4.0",
+    "pdf-lib": "^1.17.1",
+    "qrcode": "^1.5.4"
+  },
+  "main": "index.js",
+  "devDependencies": {
+    "jsqr": "^1.4.0",
+    "pngjs": "^7.0.0"
+  }
+}

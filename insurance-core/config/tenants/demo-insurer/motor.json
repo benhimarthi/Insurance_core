@@ -1,0 +1,132 @@
+{
+  "_note": "DEMO configuration. Generic placeholder values, not any insurer's real tariff or rules.",
+  "tenantId": "demo-insurer",
+  "line": "motor",
+  "version": "2026.11-demo",
+  "currency": "MAD",
+
+  "requiredFields": [
+    "driver.age", "driver.licenseYears", "driver.claimsLast3Years", "driver.hasSuspension",
+    "vehicle.category", "vehicle.value", "vehicle.ageYears", "vehicle.usage",
+    "location.riskZone", "coverage"
+  ],
+
+  "_zoneNote": "DEMO mapping from city to risk zone. Placeholder values only.",
+  "zoneMap": { "casablanca": "high", "casa": "high", "rabat": "medium", "marrakech": "medium", "tanger": "medium", "default": "low" },
+
+  "eligibility": [
+    { "id": "AGE_MIN", "outcome": "refuse", "message": "Driver is under the minimum age.",
+      "when": { "field": "driver.age", "op": "lt", "value": 18 } },
+    { "id": "LICENSE_SUSPENDED", "outcome": "refuse", "message": "Driving license is suspended.",
+      "when": { "field": "driver.hasSuspension", "op": "eq", "value": true } },
+    { "id": "NEW_LICENSE", "outcome": "refer", "message": "License held for less than 1 year.",
+      "when": { "field": "driver.licenseYears", "op": "lt", "value": 1 } },
+    { "id": "COMMERCIAL_USE", "outcome": "refer", "message": "Commercial or professional use needs underwriter review.",
+      "when": { "field": "vehicle.usage", "op": "in", "value": ["taxi", "ride_hailing", "rental", "goods_transport"] } },
+    { "id": "LUXURY_VEHICLE", "outcome": "refer", "message": "Luxury vehicle needs underwriter review.",
+      "when": { "field": "vehicle.category", "op": "eq", "value": "luxury" } },
+    { "id": "OLD_VEHICLE_COMPREHENSIVE", "outcome": "refer", "message": "Comprehensive cover on a vehicle older than 15 years.",
+      "when": { "all": [
+        { "field": "vehicle.ageYears", "op": "gt", "value": 15 },
+        { "field": "coverage", "op": "eq", "value": "tous_risques" } ] } }
+  ],
+
+  "risk": {
+    "factors": [
+      { "id": "YOUNG_DRIVER", "label": "Driver under 25", "points": 20,
+        "when": { "field": "driver.age", "op": "lt", "value": 25 } },
+      { "id": "YOUNG_ADULT", "label": "Driver aged 25 to 29", "points": 8,
+        "when": { "all": [ { "field": "driver.age", "op": "gte", "value": 25 }, { "field": "driver.age", "op": "lt", "value": 30 } ] } },
+      { "id": "SENIOR_DRIVER", "label": "Driver aged 70 or over", "points": 15,
+        "when": { "field": "driver.age", "op": "gte", "value": 70 } },
+      { "id": "RECENT_LICENSE", "label": "License held for less than 3 years", "points": 15,
+        "when": { "all": [ { "field": "driver.licenseYears", "op": "gte", "value": 1 }, { "field": "driver.licenseYears", "op": "lt", "value": 3 } ] } },
+      { "id": "CLAIMS_1", "label": "1 claim in the last 3 years", "points": 10,
+        "when": { "field": "driver.claimsLast3Years", "op": "eq", "value": 1 } },
+      { "id": "CLAIMS_2", "label": "2 claims in the last 3 years", "points": 25,
+        "when": { "field": "driver.claimsLast3Years", "op": "eq", "value": 2 } },
+      { "id": "CLAIMS_3_PLUS", "label": "3 or more claims in the last 3 years", "points": 45,
+        "when": { "field": "driver.claimsLast3Years", "op": "gte", "value": 3 } },
+      { "id": "ZONE_HIGH", "label": "High-risk zone", "points": 10,
+        "when": { "field": "location.riskZone", "op": "eq", "value": "high" } },
+      { "id": "ZONE_MEDIUM", "label": "Medium-risk zone", "points": 4,
+        "when": { "field": "location.riskZone", "op": "eq", "value": "medium" } },
+      { "id": "OLD_VEHICLE", "label": "Vehicle older than 10 years", "points": 5,
+        "when": { "field": "vehicle.ageYears", "op": "gt", "value": 10 } }
+    ],
+    "bands": [
+      { "band": "low", "maxScore": 19 },
+      { "band": "medium", "maxScore": 39 },
+      { "band": "high", "maxScore": 69 },
+      { "band": "very_high", "maxScore": 9999 }
+    ],
+    "referAt": 40,
+    "refuseAt": 70
+  },
+
+  "pricing": {
+    "base": { "tiers": 1200, "tous_risques": 2500 },
+    "valueRate": { "tous_risques": 0.012 },
+    "multipliers": [
+      { "id": "M_SUV", "label": "SUV or pickup", "factor": 1.10,
+        "when": { "field": "vehicle.category", "op": "in", "value": ["suv", "pickup"] } },
+      { "id": "M_LUXURY", "label": "Luxury vehicle", "factor": 1.50,
+        "when": { "field": "vehicle.category", "op": "eq", "value": "luxury" } },
+      { "id": "M_ZONE_HIGH", "label": "High-risk zone", "factor": 1.15,
+        "when": { "field": "location.riskZone", "op": "eq", "value": "high" } },
+      { "id": "M_NO_CLAIM_BONUS", "label": "No-claim bonus", "factor": 0.90,
+        "when": { "all": [
+          { "field": "driver.claimsLast3Years", "op": "eq", "value": 0 },
+          { "field": "driver.licenseYears", "op": "gte", "value": 5 } ] } }
+    ],
+    "bandLoading": { "low": 1.0, "medium": 1.10, "high": 1.35, "very_high": 1.0 },
+    "policyFee": 150
+  },
+
+  "documents": {
+    "required": ["national_id", "vehicle_registration"],
+    "resubmitBelow": 0.5,
+    "maxResubmits": 3,
+    "ageTolerance": 1,
+    "vehicleAgeTolerance": 1,
+    "nameSimilarityMin": 0.5
+  },
+
+  "policy": {
+    "numberPrefix": "DEMO-MOT",
+    "durationMonths": 12,
+    "startDelayDays": 1,
+    "paymentLinkHours": 48
+  },
+
+  "policy": { "numberPrefix": "DEMO", "durationMonths": 12, "startOffsetDays": 0 },
+  "payment": { "linkExpiryMinutes": 1440 },
+  "branding": { "insurerName": "Assurance Démo", "primaryColor": "#1F4E79" },
+
+  "_coverageNote": "Illustrative demo wording, not real policy terms.",
+  "coverageInfo": {
+    "tiers": {
+      "label": { "fr": "Responsabilité civile (tiers)", "en": "Third-party liability" },
+      "guarantees": [
+        { "fr": "Dommages corporels et matériels causés aux tiers", "en": "Bodily injury and property damage caused to third parties" }
+      ]
+    },
+    "tous_risques": {
+      "label": { "fr": "Tous risques", "en": "Comprehensive" },
+      "guarantees": [
+        { "fr": "Dommages corporels et matériels causés aux tiers", "en": "Bodily injury and property damage caused to third parties" },
+        { "fr": "Dommages au véhicule assuré (collision et accident)", "en": "Damage to the insured vehicle (collision and accident)" },
+        { "fr": "Vol et incendie", "en": "Theft and fire" },
+        { "fr": "Bris de glace", "en": "Glass breakage" }
+      ]
+    }
+  },
+
+  "authorization": { "underwriterPremiumLimit": 15000 },
+
+  "escalation": {
+    "maxAutoVehicleValue": 400000,
+    "minConfidence": 0.7,
+    "autoDecline": false
+  }
+}
