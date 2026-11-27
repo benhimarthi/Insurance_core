@@ -205,11 +205,13 @@ test('enabled modules: from the environment, else from .env.<project> (as during
   assert.deepStrictEqual(resolveEnabledModules({ env: {}, dir }), ['all']);
 });
 
-test('deployed members handler runs end to end: builds the Firebase app and Auth with the installed firebase-admin', { skip: !hasFirebase }, () => {
+test('deployed members handler runs end to end: builds the default Firebase app and Auth, even when firebase-functions created its own app', { skip: !hasFirebase }, () => {
   // Runs in a child process so the Firebase app and env stay isolated. Calls the real callable
   // handler (as Cloud Functions does): a signed-out call must be refused cleanly, not crash.
   const { execFileSync } = require('child_process');
+  // The named app mimics firebase-functions, which creates one when it verifies a signed-in caller.
   const script = `
+    require('firebase-admin/app').initializeApp({ projectId: 'demo-test' }, '__FIREBASE_FUNCTIONS_SDK__');
     const m = require(${JSON.stringify(require.resolve('../index.js'))}).members;
     m.run({ auth: null, data: { action: 'myTenants' }, rawRequest: {} })
       .then(() => console.log('NO_ERROR'), (e) => console.log(e.code + '|' + e.message));`;

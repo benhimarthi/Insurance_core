@@ -69,8 +69,11 @@ const PARAM = moduleEnabled('app') ? {
   VERIFY_BASE_URL: defineString('VERIFY_BASE_URL', { default: '' }),
 } : null;
 
-// firebase-admin 14 has only the modular API (no admin.apps / admin.auth()).
-const firebaseApp = () => (getApps().length ? getAdminApp() : initializeApp());
+// firebase-admin 14 has only the modular API (no admin.apps / admin.auth()). Look for the DEFAULT app
+// by name: firebase-functions creates its own named app ("__FIREBASE_FUNCTIONS_SDK__") when it verifies
+// a signed-in caller, so "some app exists" does not mean the default one does.
+const DEFAULT_APP = '[DEFAULT]';
+const firebaseApp = () => (getApps().some((a) => a.name === DEFAULT_APP) ? getAdminApp() : initializeApp());
 // Named database pattern: always pass the database id explicitly.
 const firestore = () => getFirestore(firebaseApp(), FIRESTORE_DATABASE_ID.value());
 
