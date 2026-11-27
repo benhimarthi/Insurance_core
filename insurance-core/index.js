@@ -34,12 +34,7 @@ const { AppError } = require('./src/server/util');
 setGlobalOptions({ region: 'europe-west1', maxInstances: 10 }); // closest region to Morocco with Gen2 support
 
 const FIRESTORE_DATABASE_ID = defineString('FIRESTORE_DATABASE_ID', { default: '(default)' });
-const GEMINI_MODEL = defineString('GEMINI_MODEL', { default: 'gemini-2.5-flash' });
-const DEMO_PAYMENTS = defineString('DEMO_PAYMENTS', { default: 'false' });
-const DEMO_PAY_BASE_URL = defineString('DEMO_PAY_BASE_URL', { default: '' });
-const USE_LOCAL_TENANTS = defineString('USE_LOCAL_TENANTS', { default: 'false' });
 const REQUIRE_MFA = defineString('REQUIRE_MFA', { default: 'true' }); // needs Identity Platform; keep true in production
-const VERIFY_BASE_URL = defineString('VERIFY_BASE_URL', { default: '' });
 
 /**
  * Which modules this deployment defines functions for, from ENABLED_MODULES (comma separated, in
@@ -62,6 +57,16 @@ const SECRET = moduleEnabled('app') ? {
   VERIFY_SECRET: defineSecret('VERIFY_SECRET'),
 } : null;
 const SECRETS = SECRET ? Object.values(SECRET) : [];
+
+// Params of the app module, declared only when it is enabled, like its secrets (in a non-interactive
+// deploy the CLI wants a value in .env.<project> for every declared param).
+const PARAM = moduleEnabled('app') ? {
+  GEMINI_MODEL: defineString('GEMINI_MODEL', { default: 'gemini-2.5-flash' }),
+  DEMO_PAYMENTS: defineString('DEMO_PAYMENTS', { default: 'false' }),
+  DEMO_PAY_BASE_URL: defineString('DEMO_PAY_BASE_URL', { default: '' }),
+  USE_LOCAL_TENANTS: defineString('USE_LOCAL_TENANTS', { default: 'false' }),
+  VERIFY_BASE_URL: defineString('VERIFY_BASE_URL', { default: '' }),
+} : null;
 
 const firebaseApp = () => (admin.apps.length ? admin.app() : admin.initializeApp());
 // Named database pattern: always pass the database id explicitly.
@@ -86,16 +91,16 @@ function getApp() {
       bucket: getStorage(firebaseApp()).bucket(),
       env: {
         geminiApiKey: SECRET.GEMINI_API_KEY.value(),
-        geminiModel: GEMINI_MODEL.value(),
+        geminiModel: PARAM.GEMINI_MODEL.value(),
         wasenderApiKey: SECRET.WASENDER_API_KEY.value(),
         wasenderWebhookSecret: SECRET.WASENDER_WEBHOOK_SECRET.value(),
         paymentWebhookSecret: SECRET.PAYMENT_WEBHOOK_SECRET.value(),
         phonePepper: SECRET.PHONE_PEPPER.value(),
-        demoPaymentsEnabled: DEMO_PAYMENTS.value() === 'true',
-        demoPayBaseUrl: DEMO_PAY_BASE_URL.value(),
-        useLocalTenants: USE_LOCAL_TENANTS.value() === 'true',
+        demoPaymentsEnabled: PARAM.DEMO_PAYMENTS.value() === 'true',
+        demoPayBaseUrl: PARAM.DEMO_PAY_BASE_URL.value(),
+        useLocalTenants: PARAM.USE_LOCAL_TENANTS.value() === 'true',
         requireMfa: REQUIRE_MFA.value() !== 'false',
-        verifyBaseUrl: VERIFY_BASE_URL.value(),
+        verifyBaseUrl: PARAM.VERIFY_BASE_URL.value(),
         verifySecret: SECRET.VERIFY_SECRET.value(),
       },
     });
