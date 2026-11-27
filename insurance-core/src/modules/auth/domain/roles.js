@@ -47,7 +47,7 @@ const ROLES = Object.freeze({
   // reading customer data means adding yourself as a member, which is logged with a reason.
   platform_admin: {
     scope: 'platform', mfa: true,
-    permissions: ['members:read', 'members:manage', 'config:read', 'config:write'],
+    permissions: ['members:read', 'members:manage', 'config:read', 'config:write', 'tenants:manage'],
     grantable: TENANT_ROLES_LIST,
   },
 });

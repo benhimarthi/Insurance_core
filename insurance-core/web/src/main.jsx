@@ -4,9 +4,10 @@ import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { createFirebasePort, createCallable } from 'insurance-dashboard-auth/firebase';
 import { createAuthClient, createTenantStore, createMembersApi, createReasonAsker, createInviteKeeper } from 'insurance-dashboard-auth';
-import { DashboardProvider, DashboardShell, ReasonDialog } from 'insurance-dashboard-auth/react';
+import { DashboardProvider, ReasonDialog } from 'insurance-dashboard-auth/react';
 import { firebaseConfig } from './firebaseConfig.js';
-import { MembersPage } from './MembersPage.jsx';
+import { AppShell } from './AppShell.jsx';
+import { createTenantsApi } from './tenantsApi.js';
 import { QrCode } from './QrCode.jsx';
 import './styles.css';
 
@@ -18,12 +19,15 @@ const app = initializeApp(firebaseConfig);
 const client = createAuthClient({ port: createFirebasePort({ auth: getAuth(app) }), requireMfa });
 const asker = createReasonAsker();
 let store;
+const call = createCallable({ app });
+const getContext = () => { const c = store.getActive(); return c && { tenantId: c.tenantId, access: c.access }; };
 const api = createMembersApi({
-  call: createCallable({ app }),
+  call,
   askReason: (action) => asker.ask(action),
-  getContext: () => { const c = store.getActive(); return c && { tenantId: c.tenantId, access: c.access }; },
+  getContext,
   lang,
 });
+const tenantsApi = createTenantsApi({ call, askReason: (action) => asker.ask(action), getContext });
 store = createTenantStore({ api, storage: window.localStorage });
 const keeper = createInviteKeeper({ win: window });
 keeper.capture(); // reads an invitation link (#t=...&i=...&k=...) and removes the token from the address bar
@@ -31,9 +35,7 @@ keeper.capture(); // reads an invitation link (#t=...&i=...&k=...) and removes t
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <DashboardProvider client={client} store={store} api={api} keeper={keeper}>
-      <DashboardShell lang={lang} renderQr={(url) => <QrCode value={url} />}>
-        <MembersPage lang={lang} />
-      </DashboardShell>
+      <AppShell lang={lang} renderQr={(url) => <QrCode value={url} />} tenantsApi={tenantsApi} />
       <ReasonDialog asker={asker} lang={lang} />
     </DashboardProvider>
   </StrictMode>,

@@ -11,6 +11,7 @@ const PERMISSIONS = Object.freeze([
   'config:write',     // change rules, tariff and settings
   'members:read',     // list members and pending invitations
   'members:manage',   // invite, change role, disable, remove members
+  'tenants:manage',   // create insurers, rename, suspend, rotate their web chat key (platform team)
 ]);
 
 module.exports = { PERMISSIONS };

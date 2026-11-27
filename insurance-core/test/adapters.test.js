@@ -8,7 +8,7 @@ const { createWaSenderChannel } = require('../src/channels/whatsapp');
 const { createGemini } = require('../src/adapters/gemini');
 const { createLlmExtractor } = require('../src/adapters/extractor');
 const { createLlmDocumentProcessor } = require('../src/adapters/documentProcessor');
-const { createTenantLoader } = require('../src/server/tenants');
+const { createTenantLoader } = require('../src/modules/tenants');
 const { createFirestorePolicyAdmin } = require('../src/adapters/firestorePolicyAdmin');
 const { createFirebaseStorage } = require('../src/adapters/storage');
 const { stripUndefined, customerKey, safeEqual } = require('../src/server/util');
@@ -174,7 +174,7 @@ try { require.resolve('firebase-functions/v2/https'); require.resolve('firebase-
 
 test('index.js loads and exports the expected functions', { skip: !hasFirebase }, () => {
   const exported = Object.keys(require('../index.js')).sort();
-  assert.deepStrictEqual(exported, ['demoPay', 'members', 'paymentWebhook', 'retryOutbox', 'underwriterDecision', 'verify', 'webchat', 'whatsappWebhook']);
+  assert.deepStrictEqual(exported, ['demoPay', 'members', 'paymentWebhook', 'retryOutbox', 'tenants', 'underwriterDecision', 'verify', 'webchat', 'whatsappWebhook']);
 });
 
 test('index.js defines only the enabled modules (ENABLED_MODULES), so missing secrets of others do not block a deploy', { skip: !hasFirebase }, () => {
@@ -189,7 +189,8 @@ test('index.js defines only the enabled modules (ENABLED_MODULES), so missing se
   };
   assert.deepStrictEqual(load('auth'), ['members']);
   assert.deepStrictEqual(load('app'), ['demoPay', 'paymentWebhook', 'retryOutbox', 'underwriterDecision', 'verify', 'webchat', 'whatsappWebhook']);
-  assert.strictEqual(load('auth, app').length, 8);
+  assert.deepStrictEqual(load('auth,tenants'), ['members', 'tenants']);
+  assert.strictEqual(load('auth, tenants, app').length, 9);
 });
 
 test('enabled modules: from the environment, else from .env.<project> (as during the CLI analysis), else all', () => {

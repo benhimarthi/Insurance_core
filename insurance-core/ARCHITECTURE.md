@@ -44,7 +44,7 @@ identifier formats, hashing helpers, `stripUndefined` for Firestore. Keep it sma
 | Module | Status | Contents |
 |---|---|---|
 | `auth` | **done** | roles, permissions, authorization, invitations, member management, access audit trail. Deployable alone (`members` function, no secrets) |
-| `tenants` | planned | insurer settings and configuration loading (`src/server/tenants.js`) |
+| `tenants` | **done** | insurers (create, rename, demo flag, suspend, web chat key), rules JSON validated, versioned and restorable, tenant loader. Function `tenants`, no secrets |
 | `conversation` | planned | chat flow, questions, NLU, messages (`src/conversation`), WhatsApp and web chat channels |
 | `underwriting` | planned | rules engine (`src/rules`), referrals and underwriter decisions |
 | `documents` | planned | ID and registration checks (`src/documents`, document processor adapters) |
@@ -83,3 +83,29 @@ src/modules/auth/
 Public API (`require('./src/modules/auth')`): `createAuthModule`, `ROLES`, `PERMISSIONS`, `TENANT_ROLES`,
 `can`, `isTenantRole`, `isPlatformRole`, `INVITE_TTL_MS`. Other modules use `authModule.authorize()`
 (for example the underwriter decision checks `case:decide`).
+
+## The tenants module
+
+```
+src/modules/tenants/
+  index.js                          createTenantsModule({ db, authorize, configTemplate }), createTenantLoader
+  domain/
+    tenant.js                       insurer identity, statuses, policy-number prefix
+    ruleConfig.js                   validateRuleConfig: what the engine, questions, documents, policy and PDF read
+    conditions.js                   the engine's condition grammar (keep OPERATORS in sync with the engine)
+    adminEvent.js                   audit record of changes to an insurer or its rules
+  application/
+    ports.js                        Authorizer (from the auth module), TenantStore, TenantUnitOfWork, KeyService, Clock
+    useCases/tenants.js             getTenant, createTenant, updateTenant, setTenantStatus, rotateWebchatKey
+    useCases/ruleConfig.js          getRuleConfig, checkRuleConfig, updateRuleConfig, list/get/restore versions
+  infrastructure/
+    firestoreTenantStore.js         tenants, configs, configMeta, configVersions, adminEvents, tenantSecrets
+    tenantLoader.js                 what the chat, payment and policy code use (60 s cache)
+    cryptoKeyService.js             web chat keys
+  interface/
+    tenantsController.js            the `tenants` callable: { action, tenantId, reason, ... }
+```
+
+Modules depend on each other through ports wired in the app's composition root (`index.js`): the tenants
+module receives `authorize` from the auth module and never imports it. The auth module owns permissions
+(`config:read`, `config:write`, `tenants:manage`).

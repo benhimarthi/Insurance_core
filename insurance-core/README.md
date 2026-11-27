@@ -15,18 +15,20 @@ The code is being organised as feature modules following clean architecture: see
 | `src/policy`, `src/payment` | Quote to payment to policy PDF; webhook signature verification |
 | `src/verification` | QR verification links: unguessable codes, public read-only view |
 | `src/modules/auth` | Auth module (clean architecture): roles, permissions, invitations, member management, audit of access changes |
+| `src/modules/tenants` | Tenants module: insurers (create, rename, suspend), their rules JSON (validated, versioned, restorable), the tenant loader |
 | `src/shared` | Shared kernel: errors, identifier formats, hashing helpers |
-| `src/server` | Framework-agnostic handlers, Firestore repository, outbox, tenants |
+| `src/server` | Framework-agnostic handlers, Firestore repository, outbox (not yet split into modules) |
 | `src/channels`, `src/adapters` | WaSender, Gemini, storage, demo payment, policy numbering |
 | `index.js` | Cloud Functions entry (thin HTTP adapter) |
 | `dashboard/` | Dashboard login and tenant switcher (own `package.json` and tests, see its README) |
+| `web/` | Staff web app on Firebase Hosting: login, members, insurer settings and rules editor, platform page |
 
-## Deploy the auth module alone
-Firebase project: `my-super-manager-app` (`.firebaserc`). The `members` function builds only the auth module
-and needs no secrets, so staff access can go live before the rest. The GitHub Actions workflow
-`.github/workflows/deploy-auth.yml` runs all tests, then deploys `members`, the Firestore rules and indexes,
-and the staff web app (`web/`) to Firebase Hosting. It runs on every push to `main` that touches
-`insurance-core/`, or by hand (Actions tab > Deploy auth module > Run workflow).
+## Deploy module by module
+Firebase project: `my-super-manager-app` (`.firebaserc`). `ENABLED_MODULES` in `.env.my-super-manager-app`
+selects which modules' functions exist: today `auth` (`members`) and `tenants` (`tenants`), neither needs
+secrets. The GitHub Actions workflow `.github/workflows/deploy.yml` runs all tests, then deploys those
+functions, the Firestore rules and indexes, and the staff web app (`web/`) to Firebase Hosting. It runs on
+every push to `main` that touches `insurance-core/`, or by hand (Actions tab > Deploy > Run workflow).
 
 MFA is **off** for this first deploy (`REQUIRE_MFA=false` in `.env.my-super-manager-app`,
 `VITE_REQUIRE_MFA=false` in `web/.env`, `mfaOk()` returns true in `firestore.rules`). Turn it back on in
@@ -53,6 +55,18 @@ First people:
    `GOOGLE_APPLICATION_CREDENTIALS=key.json node scripts/add-member.js demo-insurer <your uid> tenant_admin <email>`
    (and/or `node scripts/grant-platform-role.js <uid> platform_admin` for your team).
 3. Everyone else: invite them from the web app; they open the link, create their account and join.
+
+## Insurers and their rules (tenants module)
+Each insurer has a rules JSON per line (today `motor`): questions, eligibility, risk, tariff, documents, policy,
+payment, branding. In the web app, **Insurer and rules** shows it in a JSON editor:
+- **Check** runs the same validator as a save; errors are listed by path (`risk.referAt`, ...).
+- **Save** needs a reason and creates a new revision; a save based on an outdated revision is refused, so two
+  people cannot overwrite each other. New conversations use the new rules within a minute (60 s cache).
+- **History** lists every revision (who, when, why); any revision can be viewed and restored (as a new revision).
+- Who: everyone with `config:read` can read; `underwriting_manager` and the platform team can change.
+- The **Platform** page (platform team only) creates insurers from a starting template; the settings page also
+  lets them rename, flag as demo, suspend/reactivate and issue a new web chat key (shown once).
+Insurers created before versioning (for example with `npm run seed`) start at revision 0.
 
 ## Run the tests
 `npm install && npm test` (no Firebase project or emulator needed: a strict Firestore double is used).
