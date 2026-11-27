@@ -204,3 +204,18 @@ test('enabled modules: from the environment, else from .env.<project> (as during
   assert.deepStrictEqual(resolveEnabledModules({ env: { GCLOUD_PROJECT: '../etc' }, dir }), ['all']);
   assert.deepStrictEqual(resolveEnabledModules({ env: {}, dir }), ['all']);
 });
+
+test('deployed members handler runs end to end: builds the Firebase app and Auth with the installed firebase-admin', { skip: !hasFirebase }, () => {
+  // Runs in a child process so the Firebase app and env stay isolated. Calls the real callable
+  // handler (as Cloud Functions does): a signed-out call must be refused cleanly, not crash.
+  const { execFileSync } = require('child_process');
+  const script = `
+    const m = require(${JSON.stringify(require.resolve('../index.js'))}).members;
+    m.run({ auth: null, data: { action: 'myTenants' }, rawRequest: {} })
+      .then(() => console.log('NO_ERROR'), (e) => console.log(e.code + '|' + e.message));`;
+  const out = execFileSync(process.execPath, ['-e', script], {
+    env: { PATH: process.env.PATH, ENABLED_MODULES: 'auth', GCLOUD_PROJECT: 'demo-test', FIREBASE_CONFIG: JSON.stringify({ projectId: 'demo-test' }) },
+    encoding: 'utf8',
+  });
+  assert.strictEqual(out.trim().split('\n').pop(), 'unauthenticated|Sign in first.');
+});
