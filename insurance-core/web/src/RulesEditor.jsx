@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { texts } from './texts.js';
 import { messageOf, reasonOf } from './tenantsApi.js';
+import { RulesForm } from './RulesForm.jsx';
+import { formText } from './rulesFormText.js';
 
 const pretty = (config) => (config ? JSON.stringify(config, null, 2) : '{\n}');
 
@@ -23,13 +25,17 @@ function parseJson(text) {
 }
 
 /**
- * The rules JSON editor of one insurer: check, save as a new revision with a reason, history,
- * view and restore. The server is the judge (same validator as the save); the browser only
+ * The rules editor of one insurer, with two views of ONE draft (the JSON text): a form for the
+ * values people change day to day, and the full JSON. Check, save as a new revision with a reason,
+ * history, view and restore. The server is the judge (same validator as the save); the browser only
  * catches JSON syntax errors early and points at them.
  */
 export function RulesEditor({ api, tenantId, rules, canWrite, lang }) {
   const x = texts(lang).rules;
   const common = texts(lang).common;
+  const fx = formText(lang);
+  const [view, setView] = useState(() => { try { return window.localStorage.getItem('rules.view') || 'form'; } catch { return 'form'; } });
+  const chooseView = (v) => { setView(v); try { window.localStorage.setItem('rules.view', v); } catch { /* private mode */ } };
   const area = useRef(null);
   const [revision, setRevision] = useState(rules.revision);
   const [meta, setMeta] = useState({ updatedAt: rules.updatedAt, updatedBy: rules.updatedBy, updatedByEmail: rules.updatedByEmail });
@@ -42,6 +48,8 @@ export function RulesEditor({ api, tenantId, rules, canWrite, lang }) {
   const [viewing, setViewing] = useState(null); // a version with its config
   const [restoreNote, setRestoreNote] = useState('');
   const dirty = text !== baseline;
+  const draft = useMemo(() => parseJson(text), [text]); // the form edits this; it writes back as JSON
+  const fieldErrors = feedback && feedback.errors ? feedback.errors : [];
 
   const loadHistory = useCallback(async () => {
     try { setHistory((await api.listVersions(tenantId)).versions); } catch { setHistory([]); }
@@ -57,8 +65,11 @@ export function RulesEditor({ api, tenantId, rules, canWrite, lang }) {
 
   const showJsonError = (err) => {
     setFeedback({ kind: 'error', text: x.jsonError(err.line, err.col, err.message) });
-    const el = area.current;
-    if (el) { el.focus(); el.setSelectionRange(err.pos, Math.min(err.pos + 1, text.length)); }
+    chooseView('json');
+    requestAnimationFrame(() => {
+      const el = area.current;
+      if (el) { el.focus(); el.setSelectionRange(err.pos, Math.min(err.pos + 1, el.value.length)); }
+    });
   };
 
   const parsed = () => {
@@ -112,7 +123,7 @@ export function RulesEditor({ api, tenantId, rules, canWrite, lang }) {
     loadHistory();
   });
 
-  const view = (rev) => run(async () => { setViewing(await api.getVersion(tenantId, rev)); setRestoreNote(''); });
+  const openVersion = (rev) => run(async () => { setViewing(await api.getVersion(tenantId, rev)); setRestoreNote(''); });
   const restore = () => run(async () => {
     const res = await api.restoreVersion(tenantId, { revision: viewing.revision, expectedRevision: revision, reason: restoreNote });
     await afterSave(res);
@@ -143,13 +154,25 @@ export function RulesEditor({ api, tenantId, rules, canWrite, lang }) {
       </div>
       {!canWrite && <p className="muted">{x.readOnly}</p>}
 
-      <textarea
-        ref={area} className="json" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKeyDown}
-        readOnly={!canWrite || busy} spellCheck={false} autoCapitalize="off" autoCorrect="off" wrap="off" rows={28} aria-label={x.title}
-      />
+      <div className="view-switch" role="tablist" aria-label={x.title}>
+        {['form', 'json'].map((v) => (
+          <button key={v} type="button" role="tab" aria-selected={view === v} className={view === v ? 'active' : ''} onClick={() => chooseView(v)}>{fx.views[v]}</button>
+        ))}
+      </div>
+
+      {view === 'form' && (draft.error
+        ? <div className="feedback error"><p>{fx.jsonFirst}</p><button type="button" onClick={() => chooseView('json')}>{fx.showJson}</button></div>
+        : <RulesForm config={draft.value} onChange={(next) => setText(pretty(next))} readOnly={!canWrite || busy} errors={fieldErrors} lang={lang} />)}
+
+      {view === 'json' && (
+        <textarea
+          ref={area} className="json" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKeyDown}
+          readOnly={!canWrite || busy} spellCheck={false} autoCapitalize="off" autoCorrect="off" wrap="off" rows={28} aria-label={x.title}
+        />
+      )}
 
       <div className="toolbar">
-        {canWrite && <button type="button" onClick={format} disabled={busy}>{x.format}</button>}
+        {canWrite && view === 'json' && <button type="button" onClick={format} disabled={busy}>{x.format}</button>}
         <button type="button" onClick={check} disabled={busy}>{x.check}</button>
         {canWrite && dirty && <button type="button" onClick={() => { setText(baseline); setFeedback(null); }} disabled={busy}>{x.reset}</button>}
       </div>
@@ -183,7 +206,7 @@ export function RulesEditor({ api, tenantId, rules, canWrite, lang }) {
               <span><strong>{x.revision} {v.revision}</strong>{v.revision === revision && <span className="badge">{x.current}</span>}</span>
               <span className="muted">{when(v.savedAt)} · {v.savedByEmail || v.savedBy}{v.restoredFrom ? ` · ${x.restored(v.restoredFrom)}` : ''}</span>
               <span className="note">{v.note}</span>
-              <button type="button" onClick={() => view(v.revision)} disabled={busy}>{x.view}</button>
+              <button type="button" onClick={() => openVersion(v.revision)} disabled={busy}>{x.view}</button>
             </li>
           ))}
         </ul>

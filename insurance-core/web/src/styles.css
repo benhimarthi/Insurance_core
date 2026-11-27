@@ -71,3 +71,34 @@ ul.history li > button { grid-area: btn; margin: 0; }
   textarea.json { font-size: 12px; }
 }
 button:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ---------- rules form view ---------- */
+.view-switch { display: inline-flex; margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.view-switch button { margin: 0; border: 0; border-radius: 0; padding: 6px 16px; color: var(--muted); }
+.view-switch button.active { background: var(--accent); color: var(--bg); }
+.rules-form { margin-top: 12px; }
+.rules-form > p { margin: 0 0 8px; font-size: .9rem; }
+.rf-section { border: 1px solid var(--line); border-radius: 8px; margin: 8px 0; background: var(--bg); }
+.rf-section > summary { cursor: pointer; padding: 10px 14px; font-weight: 600; }
+.rf-body { padding: 0 14px 12px; }
+.rf-body h4 { margin: 12px 0 4px; font-size: .95rem; }
+.rf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 4px 16px; }
+.rf-field { display: flex; flex-direction: column; margin: 6px 0; min-width: 0; }
+.rf-field > label, .rf-field > span { color: var(--muted); font-size: .9rem; margin: 0 0 4px; }
+.rf-field input, .rf-field select { max-width: none; margin-top: 0; }
+.rf-field input[aria-invalid="true"] { border-color: var(--danger); }
+.rf-field.rf-bool { flex-direction: row-reverse; justify-content: flex-end; align-items: center; gap: 8px; }
+.rf-field.rf-bool input { width: auto; }
+.rf-field .check { margin: 2px 0; }
+.rf-error { color: var(--danger); margin-top: 2px; }
+.rf-rule { border-top: 1px solid var(--line); padding: 10px 0 4px; }
+.rf-cond { font-size: .9rem; }
+.rf-cond code { font-size: .8rem; margin-left: 6px; }
+.rf-color { display: flex; align-items: center; gap: 8px; }
+.rf-color input[type="color"] { width: 44px; height: 34px; padding: 2px; }
+.rf-zones { display: flex; flex-direction: column; gap: 6px; }
+.rf-zone { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.rf-zone input, .rf-zone select { max-width: none; margin: 0; }
+.rf-zone button { margin: 0; }
+.rf-zones > button { align-self: flex-start; }
+.badge.err { background: var(--danger); color: var(--bg); border-color: transparent; }
