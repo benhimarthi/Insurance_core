@@ -20,7 +20,7 @@ const client = createAuthClient({ port: createFirebasePort({ auth: getAuth(app) 
 const asker = createReasonAsker();
 let store;
 const call = createCallable({ app });
-const getContext = () => { const c = store.getActive(); return c && { tenantId: c.tenantId, access: c.access }; };
+const getContext = () => { const c = store.getActive(); return c && { tenantId: c.tenantId, access: c.access, platformOnly: c.platformOnly || [] }; };
 const api = createMembersApi({
   call,
   askReason: (action) => asker.ask(action),
