@@ -6,14 +6,14 @@
  *     node scripts/add-member.js <tenant-id> <uid> <role> [email]
  * Everyone else should be invited through the `members` callable. Writes an audit event.
  */
-const admin = require('firebase-admin');
+const { initializeApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 const { createAuthModule } = require('../src/modules/auth');
 
 (async () => {
   const [tenantId, uid, role, email] = process.argv.slice(2);
   if (!tenantId || !uid || !role) throw new Error('Usage: node scripts/add-member.js <tenant-id> <uid> <role> [email]');
-  const app = admin.initializeApp();
+  const app = initializeApp();
   const db = getFirestore(app, process.env.FIRESTORE_DATABASE_ID || '(default)');
   await createAuthModule({ db }).bootstrapMember({ tenantId, uid, email, role });
   console.log(`${uid} is now ${role} at "${tenantId}".`);

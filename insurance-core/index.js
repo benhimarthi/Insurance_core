@@ -22,7 +22,8 @@ const { setGlobalOptions } = require('firebase-functions/v2');
 const { onRequest, onCall, HttpsError } = require('firebase-functions/v2/https');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { defineSecret, defineString } = require('firebase-functions/params');
-const admin = require('firebase-admin');
+const { initializeApp, getApps, getApp: getAdminApp } = require('firebase-admin/app');
+const { getAuth } = require('firebase-admin/auth');
 const { getFirestore } = require('firebase-admin/firestore');
 const { getStorage } = require('firebase-admin/storage');
 
@@ -68,7 +69,8 @@ const PARAM = moduleEnabled('app') ? {
   VERIFY_BASE_URL: defineString('VERIFY_BASE_URL', { default: '' }),
 } : null;
 
-const firebaseApp = () => (admin.apps.length ? admin.app() : admin.initializeApp());
+// firebase-admin 14 has only the modular API (no admin.apps / admin.auth()).
+const firebaseApp = () => (getApps().length ? getAdminApp() : initializeApp());
 // Named database pattern: always pass the database id explicitly.
 const firestore = () => getFirestore(firebaseApp(), FIRESTORE_DATABASE_ID.value());
 
@@ -76,7 +78,7 @@ const firestore = () => getFirestore(firebaseApp(), FIRESTORE_DATABASE_ID.value(
 let authModule;
 function getAuthModule() {
   if (!authModule) {
-    authModule = createAuthModule({ db: firestore(), authAdmin: admin.auth(firebaseApp()), requireMfa: REQUIRE_MFA.value() !== 'false' });
+    authModule = createAuthModule({ db: firestore(), authAdmin: getAuth(firebaseApp()), requireMfa: REQUIRE_MFA.value() !== 'false' });
   }
   return authModule;
 }
@@ -86,7 +88,7 @@ function getApp() {
   if (!app) {
     app = buildProductionApp({
       db: firestore(),
-      authAdmin: admin.auth(firebaseApp()),
+      authAdmin: getAuth(firebaseApp()),
       authModule: getAuthModule(),
       bucket: getStorage(firebaseApp()).bucket(),
       env: {

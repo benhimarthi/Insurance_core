@@ -8,7 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const admin = require('firebase-admin');
+const { initializeApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 
 (async () => {
@@ -16,7 +16,7 @@ const { getFirestore } = require('firebase-admin/firestore');
   if (!/^[a-z0-9][a-z0-9-]{2,39}$/.test(tenantId || '')) throw new Error('Usage: node scripts/seed-demo-tenant.js <tenant-id>');
   const config = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config', 'tenants', tenantId, 'motor.json'), 'utf8'));
 
-  const app = admin.initializeApp();
+  const app = initializeApp();
   const db = getFirestore(app, process.env.FIRESTORE_DATABASE_ID || '(default)');
   const webchatKey = crypto.randomBytes(18).toString('hex');
 
