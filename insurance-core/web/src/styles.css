@@ -1,0 +1,20 @@
+:root { color-scheme: light dark; --bg: #f7f7f5; --fg: #1d1d1b; --muted: #6b6b66; --line: #d9d9d4; --accent: #1f5fbf; --danger: #b3261e; }
+@media (prefers-color-scheme: dark) { :root { --bg: #161615; --fg: #ececea; --muted: #a3a39e; --line: #3a3a37; --accent: #7aa7ec; --danger: #f2b8b5; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+#root { max-width: 920px; margin: 0 auto; padding: 24px 16px; }
+h1 { font-size: 1.4rem; margin: 0 0 16px; } h2 { font-size: 1.1rem; margin: 24px 0 8px; }
+label { display: block; margin: 8px 0; color: var(--muted); }
+input, select, textarea { display: block; width: 100%; max-width: 360px; margin-top: 4px; padding: 8px; font: inherit; color: var(--fg); background: transparent; border: 1px solid var(--line); border-radius: 6px; }
+button { margin: 8px 8px 0 0; padding: 7px 14px; font: inherit; color: var(--fg); background: transparent; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+button[type="submit"] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.dash-login { max-width: 400px; margin: 48px auto; }
+.dash-error { color: var(--danger); } .dash-notice { color: var(--accent); }
+.dash-header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; padding-bottom: 12px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
+.dash-reason { position: fixed; inset: 0; display: grid; place-items: center; background: rgb(0 0 0 / .45); padding: 16px; }
+.dash-reason form { background: var(--bg); padding: 20px; border-radius: 10px; width: min(440px, 100%); }
+.qr { display: block; margin: 12px 0; background: #fff; padding: 8px; border-radius: 6px; }
+table { width: 100%; border-collapse: collapse; margin-top: 16px; } td, th { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+td button { margin-top: 0; }
+code { word-break: break-all; font-size: .85rem; }
+@media (max-width: 600px) { thead { display: none; } tr, td { display: block; } td { border: 0; padding: 2px 0; } tr { border-bottom: 1px solid var(--line); padding: 8px 0; } }

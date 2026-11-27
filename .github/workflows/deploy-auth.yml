@@ -1,0 +1,70 @@
+# Deploys the auth module to Firebase project my-super-manager-app:
+#   - Cloud Function `members` (auth module only, needs no secrets)
+#   - Firestore rules and indexes
+#   - Hosting: the staff web app (insurance-core/web)
+# Runs every test first and deploys nothing if one fails.
+#
+# Needs one repository secret, FIREBASE_SERVICE_ACCOUNT: the JSON key of a Google Cloud service
+# account allowed to deploy (see insurance-core/README.md, "Deploy the auth module alone").
+name: Deploy auth module
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'insurance-core/**'
+      - '.github/workflows/deploy-auth.yml'
+
+concurrency:
+  group: deploy-auth
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: insurance-core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Backend tests
+        run: npm ci && npm test
+      - name: Dashboard tests
+        run: npm ci && npm test
+        working-directory: insurance-core/dashboard
+      - name: Web app build
+        run: npm ci && npm run build
+        working-directory: insurance-core/web
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: insurance-core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install function dependencies
+        run: npm ci
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+      - name: Deploy
+        # --force: non-interactive (sets the Artifact Registry cleanup policy for function images).
+        run: >-
+          npx --yes firebase-tools@14 deploy
+          --project my-super-manager-app
+          --only functions:members,firestore,hosting
+          --non-interactive --force

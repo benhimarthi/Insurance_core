@@ -22,11 +22,33 @@ The code is being organised as feature modules following clean architecture: see
 | `dashboard/` | Dashboard login and tenant switcher (own `package.json` and tests, see its README) |
 
 ## Deploy the auth module alone
-The `members` function needs no secrets and builds only the auth module, so access management can go live first:
-1. Firebase project on the Blaze plan with Firestore and Authentication (email/password) enabled.
-2. `.env.<project>`: `REQUIRE_MFA=false` until Identity Platform MFA is enabled (and relax `mfaOk()` in `firestore.rules`).
-3. `firebase deploy --only functions:members,firestore`
-4. Step 7 of the full deploy below (platform admin, first insurer admin).
+Firebase project: `my-super-manager-app` (`.firebaserc`). The `members` function builds only the auth module
+and needs no secrets, so staff access can go live before the rest. The GitHub Actions workflow
+`.github/workflows/deploy-auth.yml` runs all tests, then deploys `members`, the Firestore rules and indexes,
+and the staff web app (`web/`) to Firebase Hosting. It runs on every push to `main` that touches
+`insurance-core/`, or by hand (Actions tab > Deploy auth module > Run workflow).
+
+MFA is **off** for this first deploy (`REQUIRE_MFA=false` in `.env.my-super-manager-app`,
+`VITE_REQUIRE_MFA=false` in `web/.env`, `mfaOk()` returns true in `firestore.rules`). Turn it back on in
+all three places, after enabling Identity Platform and TOTP, before any real customer data.
+
+One-time setup:
+1. Firebase console: Blaze plan; **Firestore** database `(default)` (region `eur3` or `europe-west1`);
+   **Authentication** > Sign-in method > **Email/Password** enabled.
+2. Google Cloud console > IAM > Service accounts: create `github-deployer` with the roles
+   **Firebase Admin**, **Cloud Functions Admin**, **Service Account User** and **Service Usage Consumer**,
+   then Keys > Add key > JSON.
+3. GitHub repo > Settings > Secrets and variables > Actions: add `FIREBASE_SERVICE_ACCOUNT` with the whole JSON
+   file as value, then delete the file from your computer.
+4. Run the workflow. The web app is then at `https://my-super-manager-app.web.app`.
+
+First people:
+1. Firebase console > Authentication > Add user (your email). Sign in on the web app and verify your email.
+2. Make yourself the first admin of an insurer (needs a key with Firestore access, for example the one above,
+   kept locally only for this):
+   `GOOGLE_APPLICATION_CREDENTIALS=key.json node scripts/add-member.js demo-insurer <your uid> tenant_admin <email>`
+   (and/or `node scripts/grant-platform-role.js <uid> platform_admin` for your team).
+3. Everyone else: invite them from the web app; they open the link, create their account and join.
 
 ## Run the tests
 `npm install && npm test` (no Firebase project or emulator needed: a strict Firestore double is used).

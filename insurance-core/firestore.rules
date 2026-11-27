@@ -15,8 +15,10 @@ service cloud.firestore {
     function memberPath(tenantId) {
       return /databases/$(database)/documents/tenants/$(tenantId)/members/$(request.auth.uid);
     }
+    // MFA is OFF for the first test deploy (REQUIRE_MFA=false). Before real data, restore:
+    //   return 'sign_in_second_factor' in request.auth.token.firebase;
     function mfaOk() {
-      return 'sign_in_second_factor' in request.auth.token.firebase;
+      return true;
     }
     function hasRole(tenantId, roles) {
       return request.auth != null
