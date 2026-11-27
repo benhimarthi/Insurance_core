@@ -1,7 +1,7 @@
 'use strict';
 
-const { CASE_STATUS, ACTOR, EVENT, newEvent } = require('../models/schemas');
-const { PAY } = require('../conversation/messages');
+const { CASE_STATUS, ACTOR, EVENT, newEvent } = require('../shared/cases');
+const { PAY } = require('../modules/conversation');
 const { finalPremium, isApprovedForIssuance, buildPolicyDraft } = require('./policy');
 const { generatePolicyPdf, formatMoney, formatDate } = require('./pdf');
 

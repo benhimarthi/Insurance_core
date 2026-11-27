@@ -1,15 +1,13 @@
 'use strict';
 
+const { finalPremium } = require('../shared/cases');
+
 /**
  * Pure policy logic: no I/O. Decides what premium is charged, whether a case may be issued,
  * and builds the policy draft that a PolicyAdminAdapter turns into a real policy.
  */
 
 /** Premium actually charged: the underwriter's adjustment if there is one, else the engine's. */
-function finalPremium(caseDoc) {
-  if (caseDoc.review && caseDoc.review.decision === 'adjust') return caseDoc.review.adjustedPremium;
-  return caseDoc.engineResult && caseDoc.engineResult.premium ? caseDoc.engineResult.premium.total : null;
-}
 
 /**
  * The hard rule: a policy is only ever issued for

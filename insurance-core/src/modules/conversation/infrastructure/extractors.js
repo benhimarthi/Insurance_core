@@ -1,9 +1,9 @@
 'use strict';
 
-const { parseNumber, parseBoolean, parseChoice } = require('../conversation/nlu');
+const { parseNumber, parseBoolean, parseChoice } = require('../domain/nlu');
 
 /**
- * Extractor interface:
+ * Extractors (the Extractor port of application/ports.js):
  *   extract({ message, language, question, questions }) -> Promise<{ fields: { [path]: value } }>
  * The flow validates every returned value, so an extractor can be wrong without breaking anything.
  */

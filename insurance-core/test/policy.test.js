@@ -16,7 +16,7 @@ const { parseWebhook } = require('../src/payment/webhook');
 const { notifyHumanDecision, requestPayment, handlePaymentEvent } = require('../src/policy/lifecycle');
 const { buildPolicyDraft, addMonths, isoDate } = require('../src/policy/policy');
 const { generatePolicyPdf } = require('../src/policy/pdf');
-const { applyHumanDecision, CASE_STATUS } = require('../src/models/schemas');
+const { applyHumanDecision, CASE_STATUS } = require('../src/shared/cases');
 
 const HAS_PDFTOTEXT = spawnSync('pdftotext', ['-v']).error === undefined;
 

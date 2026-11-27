@@ -30,7 +30,13 @@ const { getStorage } = require('firebase-admin/storage');
 const { buildProductionApp } = require('./src/server/production');
 const { resolveEnabledModules } = require('./src/server/enabledModules');
 const { createAuthModule } = require('./src/modules/auth');
-const { createTenantsModule } = require('./src/modules/tenants');
+const { createTenantsModule, createTenantLoader } = require('./src/modules/tenants');
+const { createConversationModule, createLlmExtractor } = require('./src/modules/conversation');
+const { legacyConversationPorts } = require('./src/server/conversationPorts');
+const { createRepository } = require('./src/server/repository');
+const { createGemini } = require('./src/adapters/gemini');
+const { createLlmDocumentProcessor, createMockDocumentProcessor } = require('./src/adapters/documentProcessor');
+const { createFirebaseStorage } = require('./src/adapters/storage');
 const { AppError } = require('./src/server/util');
 
 setGlobalOptions({ region: 'europe-west1', maxInstances: 10 }); // closest region to Morocco with Gen2 support
@@ -40,7 +46,8 @@ const REQUIRE_MFA = defineString('REQUIRE_MFA', { default: 'true' }); // needs I
 
 /**
  * Which modules this deployment defines functions for, from ENABLED_MODULES (comma separated, in
- * .env.<project>): `auth`, `tenants`, `app` (everything not yet split into modules), or `all` (the default).
+ * .env.<project>): `auth`, `tenants`, `conversation` (web chat), `app` (everything not yet split into
+ * modules: WhatsApp, payment, policy, verification), or `all` (the default).
  * See src/server/enabledModules.js for why it also reads the .env file itself.
  * The Firebase CLI checks every secret index.js declares, even with `--only functions:<name>`, so a
  * module whose secrets do not exist yet must not be defined at all.
@@ -50,20 +57,23 @@ const moduleEnabled = (name) => ENABLED_MODULES.includes('all') || ENABLED_MODUL
 
 // Secrets are declared only when a module that uses them is enabled: the CLI resolves every
 // declared secret before a deploy, and refuses it if one does not exist in Secret Manager.
-const SECRET = moduleEnabled('app') ? {
-  WASENDER_API_KEY: defineSecret('WASENDER_API_KEY'),
-  WASENDER_WEBHOOK_SECRET: defineSecret('WASENDER_WEBHOOK_SECRET'),
-  PAYMENT_WEBHOOK_SECRET: defineSecret('PAYMENT_WEBHOOK_SECRET'),
-  PHONE_PEPPER: defineSecret('PHONE_PEPPER'),
-  GEMINI_API_KEY: defineSecret('GEMINI_API_KEY'),
-  VERIFY_SECRET: defineSecret('VERIFY_SECRET'),
-} : null;
-const SECRETS = SECRET ? Object.values(SECRET) : [];
+const SECRETS_OF = {
+  conversation: ['GEMINI_API_KEY', 'PHONE_PEPPER'],
+  app: ['WASENDER_API_KEY', 'WASENDER_WEBHOOK_SECRET', 'PAYMENT_WEBHOOK_SECRET', 'PHONE_PEPPER', 'GEMINI_API_KEY', 'VERIFY_SECRET'],
+};
+const SECRET = {};
+for (const [mod, names] of Object.entries(SECRETS_OF)) {
+  if (!moduleEnabled(mod)) continue;
+  for (const name of names) if (!SECRET[name]) SECRET[name] = defineSecret(name);
+}
+const secretsOf = (mod) => SECRETS_OF[mod].map((name) => SECRET[name]);
+const SECRETS = moduleEnabled('app') ? secretsOf('app') : [];
 
-// Params of the app module, declared only when it is enabled, like its secrets (in a non-interactive
+// Params, declared only when a module that uses them is enabled, like secrets (in a non-interactive
 // deploy the CLI wants a value in .env.<project> for every declared param).
+const GEMINI_MODEL = moduleEnabled('conversation') || moduleEnabled('app') ? defineString('GEMINI_MODEL', { default: 'gemini-2.5-flash' }) : null;
 const PARAM = moduleEnabled('app') ? {
-  GEMINI_MODEL: defineString('GEMINI_MODEL', { default: 'gemini-2.5-flash' }),
+  GEMINI_MODEL,
   DEMO_PAYMENTS: defineString('DEMO_PAYMENTS', { default: 'false' }),
   DEMO_PAY_BASE_URL: defineString('DEMO_PAY_BASE_URL', { default: '' }),
   USE_LOCAL_TENANTS: defineString('USE_LOCAL_TENANTS', { default: 'false' }),
@@ -99,6 +109,28 @@ function getTenantsModule() {
     });
   }
   return tenantsModule;
+}
+
+// Conversation module (web chat): Gemini reads the answers and the documents. Only its two secrets.
+let conversationModule;
+function getConversationModule() {
+  if (!conversationModule) {
+    const db = firestore();
+    const gemini = createGemini({ apiKey: SECRET.GEMINI_API_KEY.value(), model: GEMINI_MODEL.value() });
+    const llmDocuments = createLlmDocumentProcessor({ callModel: gemini.callVision });
+    const demoDocuments = createMockDocumentProcessor(); // demo insurers only: the chat page's sample documents
+    conversationModule = createConversationModule({
+      extractor: createLlmExtractor({ callModel: gemini.callText }),
+      ...legacyConversationPorts({
+        documentProcessor: { process: (args) => (args.attachment.demoFixture ? demoDocuments : llmDocuments).process(args) },
+      }), // no payment port yet: an accepted quote is "confirmed" and the insurer follows up
+      store: createRepository(db),
+      uploads: createFirebaseStorage(getStorage(firebaseApp()).bucket()),
+      tenants: { load: createTenantLoader({ db, localDir: null }) },
+      pepper: SECRET.PHONE_PEPPER.value(),
+    });
+  }
+  return conversationModule;
 }
 
 let app;
@@ -177,13 +209,18 @@ if (moduleEnabled('tenants')) {
   exports.tenants = callable((request) => getTenantsModule().handle({ auth: authOf(request), data: request.data }), { secrets: [] });
 }
 
+// ---------- conversation module (web chat): needs GEMINI_API_KEY and PHONE_PEPPER ----------
+// POST {webchat URL}/{tenantId}, or /api/webchat/{tenantId} through Firebase Hosting (same origin as the chat page)
+if (moduleEnabled('conversation')) {
+  const tenantOf = (req) => { const s = segments(req); return s[0] === 'api' && s[1] === 'webchat' ? s[2] : s[0]; };
+  exports.webchat = onRequest({ secrets: secretsOf('conversation'), timeoutSeconds: 120, memory: '512MiB', cors: true },
+    respond(postOnly((req) => getConversationModule().handleWebChat({ tenantId: tenantOf(req), headers: req.headers, body: req.body }))));
+}
+
 // ---------- the rest of the app (not yet split into modules): needs every secret ----------
 if (moduleEnabled('app')) {
   exports.whatsappWebhook = onRequest({ secrets: SECRETS, timeoutSeconds: 120, memory: '512MiB' },
     respond(postOnly((req) => getApp().handleWhatsAppWebhook({ tenantId: segments(req)[0], headers: req.headers, body: req.body }))));
-
-  exports.webchat = onRequest({ secrets: SECRETS, timeoutSeconds: 120, memory: '512MiB', cors: true },
-    respond(postOnly((req) => getApp().handleWebChat({ tenantId: segments(req)[0], headers: req.headers, body: req.body }))));
 
   exports.paymentWebhook = onRequest({ secrets: SECRETS, timeoutSeconds: 120, memory: '512MiB' },
     respond(postOnly((req) => getApp().handlePaymentWebhook({ tenantId: segments(req)[0], rawBody: rawBodyOf(req), headers: req.headers }))));

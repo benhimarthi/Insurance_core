@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const config = require('../config/tenants/demo-insurer/motor.json');
 const { evaluateCase } = require('../src/rules/engine');
-const { newCase, caseStatusFromEngine, applyHumanDecision, CASE_STATUS } = require('../src/models/schemas');
+const { newCase, caseStatusFromEngine, applyHumanDecision, CASE_STATUS } = require('../src/shared/cases');
 
 const cleanCase = () => ({
   driver: { age: 38, licenseYears: 15, claimsLast3Years: 0, hasSuspension: false },
