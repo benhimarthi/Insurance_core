@@ -6,7 +6,7 @@ const { createRepository } = require('./repository');
 const { createTenantLoader } = require('../modules/tenants');
 const { createWaSenderChannel } = require('../channels/whatsapp');
 const { createGemini } = require('../adapters/gemini');
-const { createLlmExtractor } = require('../modules/conversation');
+const { createLlmExtractor, createLlmAssistant } = require('../modules/conversation');
 const { createLlmDocumentProcessor } = require('../adapters/documentProcessor');
 const { createDemoPaymentAdapter } = require('../adapters/demoPayment');
 const { createFirestorePolicyAdmin } = require('../adapters/firestorePolicyAdmin');
@@ -32,6 +32,7 @@ function buildProductionApp({ db, bucket, env, paymentAdapter, authAdmin, authMo
     loadTenant: createTenantLoader({ db, localDir: env.useLocalTenants ? path.join(__dirname, '..', '..', 'config', 'tenants') : null }),
     channel: createWaSenderChannel({ apiKey: env.wasenderApiKey, webhookSecret: env.wasenderWebhookSecret }),
     extractor: createLlmExtractor({ callModel: gemini.callText }),
+    assistant: createLlmAssistant({ callModel: gemini.callText }),
     documentProcessor: createLlmDocumentProcessor({ callModel: gemini.callVision }),
     paymentAdapter: payment,
     policyAdmin: createFirestorePolicyAdmin(db),

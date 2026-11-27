@@ -32,7 +32,7 @@ const { buildProductionApp } = require('./src/server/production');
 const { resolveEnabledModules } = require('./src/server/enabledModules');
 const { createAuthModule } = require('./src/modules/auth');
 const { createTenantsModule, createTenantLoader } = require('./src/modules/tenants');
-const { createConversationModule, createConversationCleanup, createFirestoreRateLimiter, createLlmExtractor } = require('./src/modules/conversation');
+const { createConversationModule, createConversationCleanup, createFirestoreRateLimiter, createLlmExtractor, createLlmAssistant } = require('./src/modules/conversation');
 const { legacyConversationPorts } = require('./src/server/conversationPorts');
 const { createRepository } = require('./src/server/repository');
 const { createGemini } = require('./src/adapters/gemini');
@@ -128,6 +128,7 @@ function getConversationModule() {
     const demoDocuments = createMockDocumentProcessor(); // demo insurers only: the chat page's sample documents
     conversationModule = createConversationModule({
       extractor: createLlmExtractor({ callModel: gemini.callText }),
+      assistant: createLlmAssistant({ callModel: gemini.callText }), // answers questions, redirects off-topic messages
       ...legacyConversationPorts({
         documentProcessor: { process: (args) => (args.attachment.demoFixture ? demoDocuments : llmDocuments).process(args) },
       }), // no payment port yet: an accepted quote is "confirmed" and the insurer follows up

@@ -50,6 +50,7 @@ const EVENT = Object.freeze({
   PAYMENT_FAILED: 'payment_failed',
   PAYMENT_MISMATCH: 'payment_mismatch',
   POLICY_ISSUED: 'policy_issued',
+  CUSTOMER_QUESTION: 'customer_question', // the customer asked something or went off topic (kind only, never the text)
 });
 
 const paths = {

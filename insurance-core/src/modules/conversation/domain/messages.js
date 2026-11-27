@@ -50,6 +50,11 @@ const MESSAGES = {
     'Your file is being processed.',
     'الملف ديالك قيد المعالجة.'
   ),
+  offTopic: L(
+    'Je peux seulement vous aider pour votre assurance auto. Reprenons :',
+    'I can only help with your car insurance. Let us continue:',
+    'نقدر نعاونك غير فالتأمين ديال الطوموبيل. نكملو:'
+  ),
 };
 
 const QUOTE = {
