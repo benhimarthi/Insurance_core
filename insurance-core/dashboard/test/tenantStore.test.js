@@ -73,6 +73,11 @@ test('platform staff: all insurers are listed, flagged as platform access; a rea
   store.select('zeta-insurer');
   assert.equal(store.can('case:read'), false);       // no case access through the platform role
   assert.equal(store.can('members:manage'), true);
+  // where they also have a real role, they may use both: the union, with the platform-only part flagged
+  store.select('alpha-insurer');
+  assert.equal(store.can('case:decide'), true);
+  assert.equal(store.can('members:manage'), true);
+  assert.deepEqual(store.getActive().platformOnly, ['members:read', 'members:manage']);
   assert.deepEqual(api.calls, ['myTenants', 'allTenants']);
 });
 

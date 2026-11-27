@@ -1,8 +1,8 @@
 /**
  * The active-insurer ("tenant") state, framework-neutral.
  *
- * choices: every insurer the user can open, each { tenantId, name, role, access, permissions }
- *   access 'member'   a role at that insurer (from myTenants)
+ * choices: every insurer the user can open, each { tenantId, name, role, access, permissions, platformOnly? }
+ *   access 'member'   a role at that insurer (from myTenants), plus the platform role's permissions if any
  *   access 'platform' your team, via the global platform role (from allTenants); no case access
  *
  * The rule this file exists to enforce: nothing from insurer A may ever show under insurer B.
@@ -42,7 +42,14 @@ export function createTenantStore({ api, storage = null, storageKey = 'dashboard
   }
 
   function buildChoices(mine, platformTenants) {
-    const choices = mine.memberships.map((m) => ({ tenantId: m.tenantId, name: m.name, role: m.role, access: 'member', permissions: m.permissions }));
+    // Someone with a role at an insurer AND a platform role may use both there (the server tries the
+    // membership first, then the platform role): their permissions are the union of the two.
+    // `platformOnly` lists what only the platform role allows; the server wants a reason for those.
+    const platformPerms = mine.platformRole ? (mine.platformPermissions || []) : [];
+    const choices = mine.memberships.map((m) => {
+      const platformOnly = platformPerms.filter((p) => !m.permissions.includes(p));
+      return { tenantId: m.tenantId, name: m.name, role: m.role, access: 'member', permissions: [...m.permissions, ...platformOnly], platformOnly };
+    });
     const have = new Set(choices.map((c) => c.tenantId));
     for (const t of platformTenants) {
       if (have.has(t.tenantId)) continue; // a real role at that insurer wins over platform access

@@ -109,3 +109,19 @@ test('reason asker: one question at a time, resolves with the answer', async () 
   asker.resolve('ignored'); // nothing pending: no effect
   assert.ok(changes >= 3);
 });
+
+test('member who is also platform staff: a reason is asked only for what their own role does not allow', async () => {
+  const calls = [];
+  const call = async (name, payload) => { calls.push(payload); return {}; };
+  let asked = 0;
+  const ctx = { tenantId: 'alpha-insurer', access: 'member', platformOnly: ['members:read', 'members:manage'] }; // e.g. an underwriter there
+  const api = createMembersApi({ call, getContext: () => ctx, askReason: async () => { asked += 1; return 'support ticket 12'; } });
+  await api.list('alpha-insurer');
+  await api.invite('alpha-insurer', { email: 'a@x.example', role: 'auditor' });
+  assert.equal(asked, 2);
+  assert.ok(calls.every((p) => p.reason === 'support ticket 12'));
+
+  const admin = createMembersApi({ call, getContext: () => ({ tenantId: 'alpha-insurer', access: 'member', platformOnly: ['tenants:manage'] }), askReason: async () => { asked += 1; return 'never'; } });
+  await admin.list('alpha-insurer'); // a tenant_admin there: their own role is enough, no reason
+  assert.equal(asked, 2);
+});
