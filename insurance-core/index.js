@@ -73,6 +73,10 @@ const SECRETS = moduleEnabled('app') ? secretsOf('app') : [];
 // Params, declared only when a module that uses them is enabled, like secrets (in a non-interactive
 // deploy the CLI wants a value in .env.<project> for every declared param).
 const GEMINI_MODEL = moduleEnabled('conversation') || moduleEnabled('app') ? defineString('GEMINI_MODEL', { default: 'gemini-2.5-flash' }) : null;
+// Cloud Storage bucket for customer documents and policies. Named explicitly: the "default bucket" the
+// runtime guesses can be the legacy <project>.appspot.com while new projects use <project>.firebasestorage.app.
+const STORAGE_BUCKET = moduleEnabled('conversation') || moduleEnabled('app') ? defineString('STORAGE_BUCKET', { default: '' }) : null;
+const bucket = () => getStorage(firebaseApp()).bucket(STORAGE_BUCKET.value() || undefined);
 // App Check on the web chat: off | monitor | enforce (see src/modules/conversation/interface/webChatHttp.js)
 const WEBCHAT_APP_CHECK = moduleEnabled('conversation') ? defineString('WEBCHAT_APP_CHECK', { default: 'off' }) : null;
 const PARAM = moduleEnabled('app') ? {
@@ -128,7 +132,7 @@ function getConversationModule() {
         documentProcessor: { process: (args) => (args.attachment.demoFixture ? demoDocuments : llmDocuments).process(args) },
       }), // no payment port yet: an accepted quote is "confirmed" and the insurer follows up
       store: createRepository(db),
-      uploads: createFirebaseStorage(getStorage(firebaseApp()).bucket()),
+      uploads: createFirebaseStorage(bucket()),
       tenants: { load: createTenantLoader({ db, localDir: null }) },
       rateLimiter: createFirestoreRateLimiter(db),
       appCheck: {
@@ -162,7 +166,7 @@ function getApp() {
       db: firestore(),
       authAdmin: getAuth(firebaseApp()),
       authModule: getAuthModule(),
-      bucket: getStorage(firebaseApp()).bucket(),
+      bucket: bucket(),
       env: {
         geminiApiKey: SECRET.GEMINI_API_KEY.value(),
         geminiModel: PARAM.GEMINI_MODEL.value(),
@@ -241,7 +245,7 @@ if (moduleEnabled('conversation')) {
   // Data retention, every night: old customer documents and abandoned conversations. No secret needed.
   exports.conversationCleanup = onSchedule({ schedule: 'every day 03:17', timeZone: 'Africa/Casablanca', timeoutSeconds: 540 }, async () => {
     const db = firestore();
-    await createConversationCleanup({ store: createRepository(db), uploads: createFirebaseStorage(getStorage(firebaseApp()).bucket()) })();
+    await createConversationCleanup({ store: createRepository(db), uploads: createFirebaseStorage(bucket()) })();
   });
 }
 
