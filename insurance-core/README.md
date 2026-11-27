@@ -4,6 +4,8 @@ Generic AI underwriting assistant for insurers: rules engine, multilingual chat 
 verification, payment and policy PDF, plus the Firebase Cloud Functions layer that runs it on
 WhatsApp and web chat. Demo-ready, with adapters to swap in an insurer's own systems.
 
+The code is being organised as feature modules following clean architecture: see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Layout
 | Path | Role |
 |---|---|
@@ -12,11 +14,41 @@ WhatsApp and web chat. Demo-ready, with adapters to swap in an insurer's own sys
 | `src/documents`, `src/adapters/documentProcessor.js` | ID and registration checks, cross-checks |
 | `src/policy`, `src/payment` | Quote to payment to policy PDF; webhook signature verification |
 | `src/verification` | QR verification links: unguessable codes, public read-only view |
-| `src/auth` | Roles, permissions, invitations, member management, audit of access changes |
+| `src/modules/auth` | Auth module (clean architecture): roles, permissions, invitations, member management, audit of access changes |
+| `src/shared` | Shared kernel: errors, identifier formats, hashing helpers |
 | `src/server` | Framework-agnostic handlers, Firestore repository, outbox, tenants |
 | `src/channels`, `src/adapters` | WaSender, Gemini, storage, demo payment, policy numbering |
 | `index.js` | Cloud Functions entry (thin HTTP adapter) |
 | `dashboard/` | Dashboard login and tenant switcher (own `package.json` and tests, see its README) |
+
+## Deploy the auth module alone
+Firebase project: `my-super-manager-app` (`.firebaserc`). The `members` function builds only the auth module
+and needs no secrets, so staff access can go live before the rest. The GitHub Actions workflow
+`.github/workflows/deploy-auth.yml` runs all tests, then deploys `members`, the Firestore rules and indexes,
+and the staff web app (`web/`) to Firebase Hosting. It runs on every push to `main` that touches
+`insurance-core/`, or by hand (Actions tab > Deploy auth module > Run workflow).
+
+MFA is **off** for this first deploy (`REQUIRE_MFA=false` in `.env.my-super-manager-app`,
+`VITE_REQUIRE_MFA=false` in `web/.env`, `mfaOk()` returns true in `firestore.rules`). Turn it back on in
+all three places, after enabling Identity Platform and TOTP, before any real customer data.
+
+One-time setup:
+1. Firebase console: Blaze plan; **Firestore** database `(default)` (region `eur3` or `europe-west1`);
+   **Authentication** > Sign-in method > **Email/Password** enabled.
+2. Google Cloud console > IAM > Service accounts: create `github-deployer` with the roles
+   **Firebase Admin**, **Cloud Functions Admin**, **Service Account User** and **Service Usage Consumer**,
+   then Keys > Add key > JSON.
+3. GitHub repo > Settings > Secrets and variables > Actions: add `FIREBASE_SERVICE_ACCOUNT` with the whole JSON
+   file as value, then delete the file from your computer.
+4. Run the workflow. The web app is then at `https://my-super-manager-app.web.app`.
+
+First people:
+1. Firebase console > Authentication > Add user (your email). Sign in on the web app and verify your email.
+2. Make yourself the first admin of an insurer (needs a key with Firestore access, for example the one above,
+   kept locally only for this):
+   `GOOGLE_APPLICATION_CREDENTIALS=key.json node scripts/add-member.js demo-insurer <your uid> tenant_admin <email>`
+   (and/or `node scripts/grant-platform-role.js <uid> platform_admin` for your team).
+3. Everyone else: invite them from the web app; they open the link, create their account and join.
 
 ## Run the tests
 `npm install && npm test` (no Firebase project or emulator needed: a strict Firestore double is used).
@@ -53,7 +85,7 @@ Each policy PDF carries a QR code (top right) and the printed link `{verify URL}
 - It is a public endpoint: put Cloud Armor or a rate limit in front of it for production, and keep `maxInstances` low.
 
 ## Authentication and roles
-Firebase Auth proves who someone is; `src/auth` decides what they may do. Customers never sign in
+Firebase Auth proves who someone is; the auth module (`src/modules/auth`) decides what they may do. Customers never sign in
 (they are identified by WhatsApp number or web session); accounts are for staff only.
 
 | Role | Scope | Can |
@@ -79,5 +111,5 @@ Firebase Auth proves who someone is; `src/auth` decides what they may do. Custom
   records the reviewer's role.
 - **Callables:** `members` (`myTenants`, `list`, `invite`, `accept`, `revokeInvitation`, `changeRole`,
   `setStatus`, `remove`) and `underwriterDecision`.
-- **Read access for the dashboard** comes from `firestore.rules`, which mirrors the role lists in `src/auth/roles.js`.
+- **Read access for the dashboard** comes from `firestore.rules`, which mirrors the role lists in `src/modules/auth/domain/roles.js`.
   The rules are not covered by the automated tests (they need the Firestore emulator): test them there before production.

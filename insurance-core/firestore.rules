@@ -4,7 +4,7 @@ rules_version = '2';
 //
 // Reading follows the role the person has AT THAT INSURER, stored in tenants/{t}/members/{uid}
 // (live, so revoking a member takes effect immediately). Keep the role lists in sync with
-// src/auth/roles.js. Platform staff have no case access here: to read customer data they must
+// src/modules/auth/domain/roles.js. Platform staff have no case access here: to read customer data they must
 // first add themselves as a member through the audited `members` callable.
 //
 // MFA: staff roles require a second factor (sign_in_second_factor). For early demos without
@@ -15,8 +15,10 @@ service cloud.firestore {
     function memberPath(tenantId) {
       return /databases/$(database)/documents/tenants/$(tenantId)/members/$(request.auth.uid);
     }
+    // MFA is OFF for the first test deploy (REQUIRE_MFA=false). Before real data, restore:
+    //   return 'sign_in_second_factor' in request.auth.token.firebase;
     function mfaOk() {
-      return 'sign_in_second_factor' in request.auth.token.firebase;
+      return true;
     }
     function hasRole(tenantId, roles) {
       return request.auth != null

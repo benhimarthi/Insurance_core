@@ -1,8 +1,8 @@
 'use strict';
 
 /**
- * Roles and permissions. This file is the single source of truth: the server checks it on every
- * call, and firestore.rules mirrors the "who can read what" part (keep the two in sync).
+ * Roles: bundles of permissions (permissions.js). Single source of truth: the server checks it on
+ * every call, and firestore.rules mirrors the "who can read what" part (keep the two in sync).
  *
  * Staff roles are PER INSURER (tenant): one person can be underwriter at insurer A and auditor at
  * insurer B. They live in Firestore (tenants/{t}/members/{uid}), not in the sign-in token, so a
@@ -13,17 +13,7 @@
  * and (if it reads data) to the role lists in firestore.rules.
  */
 
-const PERMISSIONS = Object.freeze([
-  'case:read',        // read cases (contains personal data), documents summary and their audit events
-  'case:decide',      // approve / adjust / reject a referred case, up to the insurer's premium limit
-  'case:decide_high', // the same, without the premium limit
-  'audit:read',       // read the audit trail
-  'policy:read',      // read issued policies
-  'config:read',      // read rules, tariff and settings
-  'config:write',     // change rules, tariff and settings
-  'members:read',     // list members and pending invitations
-  'members:manage',   // invite, change role, disable, remove members
-]);
+const { PERMISSIONS } = require('./permissions');
 
 const UNDERWRITER_PERMISSIONS = ['case:read', 'case:decide', 'policy:read', 'config:read'];
 

@@ -8,7 +8,7 @@
  * out and in again for the claim to appear in their token.
  */
 const admin = require('firebase-admin');
-const { isPlatformRole } = require('../src/auth/roles');
+const { isPlatformRole } = require('../src/modules/auth');
 
 (async () => {
   const [uid, role] = process.argv.slice(2);
