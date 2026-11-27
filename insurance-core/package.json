@@ -9,7 +9,7 @@
     "seed": "node scripts/seed-demo-tenant.js"
   },
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "dependencies": {
     "firebase-admin": "^14.5.1",
