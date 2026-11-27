@@ -30,6 +30,7 @@ const { getStorage } = require('firebase-admin/storage');
 const { buildProductionApp } = require('./src/server/production');
 const { resolveEnabledModules } = require('./src/server/enabledModules');
 const { createAuthModule } = require('./src/modules/auth');
+const { createTenantsModule } = require('./src/modules/tenants');
 const { AppError } = require('./src/server/util');
 
 setGlobalOptions({ region: 'europe-west1', maxInstances: 10 }); // closest region to Morocco with Gen2 support
@@ -39,7 +40,7 @@ const REQUIRE_MFA = defineString('REQUIRE_MFA', { default: 'true' }); // needs I
 
 /**
  * Which modules this deployment defines functions for, from ENABLED_MODULES (comma separated, in
- * .env.<project>): `auth`, `app` (everything not yet split into modules), or `all` (the default).
+ * .env.<project>): `auth`, `tenants`, `app` (everything not yet split into modules), or `all` (the default).
  * See src/server/enabledModules.js for why it also reads the .env file itself.
  * The Firebase CLI checks every secret index.js declares, even with `--only functions:<name>`, so a
  * module whose secrets do not exist yet must not be defined at all.
@@ -84,6 +85,20 @@ function getAuthModule() {
     authModule = createAuthModule({ db: firestore(), authAdmin: getAuth(firebaseApp()), requireMfa: REQUIRE_MFA.value() !== 'false' });
   }
   return authModule;
+}
+
+// Tenants module: insurers and their rules. No secrets either; permissions come from the auth module.
+let tenantsModule;
+function getTenantsModule() {
+  if (!tenantsModule) {
+    const auth = getAuthModule();
+    tenantsModule = createTenantsModule({
+      db: firestore(),
+      authorize: ({ caller, ...rest }) => auth.authorize({ auth: caller, ...rest }),
+      configTemplate: require('./config/tenants/demo-insurer/motor.json'), // starting rules of a new insurer
+    });
+  }
+  return tenantsModule;
 }
 
 let app;
@@ -141,7 +156,7 @@ function callable(handler, { secrets = SECRETS } = {}) {
     try {
       return await handler(request);
     } catch (err) {
-      if (err instanceof AppError) throw new HttpsError(err.code, err.message);
+      if (err instanceof AppError) throw new HttpsError(err.code, err.message, err.details);
       console.error(err);
       throw new HttpsError('internal', 'Internal error.');
     }
@@ -153,6 +168,13 @@ function callable(handler, { secrets = SECRETS } = {}) {
 // Platform staff must add `reason` on every action that targets an insurer.
 if (moduleEnabled('auth')) {
   exports.members = callable((request) => getAuthModule().handle({ auth: authOf(request), data: request.data }), { secrets: [] });
+}
+
+// ---------- tenants module: needs no secrets ----------
+// { action: 'get' | 'getRules' | 'checkRules' | 'listVersions' | 'getVersion' | 'updateRules' | 'restoreVersion'
+//           | 'create' | 'update' | 'setStatus' | 'rotateWebchatKey', tenantId, reason, ... }
+if (moduleEnabled('tenants')) {
+  exports.tenants = callable((request) => getTenantsModule().handle({ auth: authOf(request), data: request.data }), { secrets: [] });
 }
 
 // ---------- the rest of the app (not yet split into modules): needs every secret ----------

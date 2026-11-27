@@ -2,10 +2,10 @@
 
 const fs = require('fs');
 const path = require('path');
-const { TENANT_ID_RE } = require('./util');
+const { TENANT_ID_RE } = require('../../../shared/ids');
 
 /**
- * Loads a tenant (insurer or demo) and its rules config.
+ * Loads a tenant (insurer or demo) and its rules config, for the chat, payment and policy code.
  *   Firestore:  tenants/{id}                   { name, status, demo }
  *               tenants/{id}/configs/motor     the rules, tariff, documents, policy config
  *               tenantSecrets/{id}             { webchatKey }  (no client access)

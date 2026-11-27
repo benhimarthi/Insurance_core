@@ -3,7 +3,7 @@
 const path = require('path');
 const { buildApp } = require('./app');
 const { createRepository } = require('./repository');
-const { createTenantLoader } = require('./tenants');
+const { createTenantLoader } = require('../modules/tenants');
 const { createWaSenderChannel } = require('../channels/whatsapp');
 const { createGemini } = require('../adapters/gemini');
 const { createLlmExtractor } = require('../adapters/extractor');

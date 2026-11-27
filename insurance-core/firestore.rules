@@ -43,6 +43,7 @@ service cloud.firestore {
       }
       match /policies/{policyNumber} { allow read: if canReadCases(tenantId); }
       match /configs/{configId} { allow read: if canReadCases(tenantId); }
+      // configMeta, configVersions and adminEvents (tenants module): read through the `tenants` callable only
 
       match /members/{uid} {
         allow read: if request.auth != null && request.auth.uid == uid

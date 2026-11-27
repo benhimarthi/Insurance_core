@@ -1,12 +1,13 @@
-# Deploys the auth module to Firebase project my-super-manager-app:
-#   - Cloud Function `members` (auth module only, needs no secrets)
+# Deploys to Firebase project my-super-manager-app:
+#   - the Cloud Functions of the modules enabled in insurance-core/.env.my-super-manager-app
+#     (ENABLED_MODULES; today auth -> `members` and tenants -> `tenants`, neither needs secrets)
 #   - Firestore rules and indexes
 #   - Hosting: the staff web app (insurance-core/web)
 # Runs every test first and deploys nothing if one fails.
 #
 # Needs one repository secret, FIREBASE_SERVICE_ACCOUNT: the JSON key of a Google Cloud service
 # account allowed to deploy (see insurance-core/README.md, "Deploy the auth module alone").
-name: Deploy auth module
+name: Deploy
 
 on:
   workflow_dispatch:
@@ -14,10 +15,10 @@ on:
     branches: [main]
     paths:
       - 'insurance-core/**'
-      - '.github/workflows/deploy-auth.yml'
+      - '.github/workflows/deploy.yml'
 
 concurrency:
-  group: deploy-auth
+  group: deploy
   cancel-in-progress: false
 
 permissions:
@@ -62,9 +63,10 @@ jobs:
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
       - name: Deploy
+        # --only functions: every function index.js defines, i.e. the enabled modules' ones.
         # --force: non-interactive (sets the Artifact Registry cleanup policy for function images).
         run: >-
           npx --yes firebase-tools@14 deploy
           --project my-super-manager-app
-          --only functions:members,firestore,hosting
+          --only functions,firestore,hosting
           --non-interactive --force

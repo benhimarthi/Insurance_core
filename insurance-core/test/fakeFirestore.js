@@ -2,7 +2,7 @@
 
 /**
  * Minimal in-memory Firestore double, covering exactly what the server layer uses:
- * doc/collection refs, get/set(+merge), where(==, <=)/limit queries and transactions.
+ * doc/collection refs, get/set(+merge), where(==, <=)/orderBy/limit/select queries and transactions.
  * It is deliberately strict like the real thing: undefined values are rejected.
  */
 
@@ -30,17 +30,27 @@ class DocRef {
 }
 
 class Query {
-  constructor(db, path, filters = [], max) { this.db = db; this.path = path; this.filters = filters; this.max = max; }
-  where(field, op, value) { return new Query(this.db, this.path, [...this.filters, { field, op, value }], this.max); }
-  limit(n) { return new Query(this.db, this.path, this.filters, n); }
+  constructor(db, path, filters = [], max, order = null, fields = null) {
+    this.db = db; this.path = path; this.filters = filters; this.max = max; this.order = order; this.fields = fields;
+  }
+  _with(patch) { const q = Object.assign(Object.create(Query.prototype), this, patch); return q; }
+  where(field, op, value) { return this._with({ filters: [...this.filters, { field, op, value }] }); }
+  limit(n) { return this._with({ max: n }); }
+  orderBy(field, dir = 'asc') { return this._with({ order: { field, dir } }); }
+  select(...fields) { return this._with({ fields }); }
   async get() {
     const docs = [];
     for (const [p, d] of this.db.docs) {
       if (!p.startsWith(`${this.path}/`) || p.slice(this.path.length + 1).includes('/')) continue;
       const ok = this.filters.every(({ field, op, value }) => (op === '==' ? d[field] === value : op === '<=' ? d[field] <= value : false));
-      if (ok) docs.push({ id: p.split('/').pop(), data: () => structuredClone(d) });
+      if (ok) docs.push({ id: p.split('/').pop(), d });
     }
-    const out = this.max ? docs.slice(0, this.max) : docs;
+    if (this.order) {
+      const { field, dir } = this.order;
+      docs.sort((a, b) => (a.d[field] < b.d[field] ? -1 : a.d[field] > b.d[field] ? 1 : 0) * (dir === 'desc' ? -1 : 1));
+    }
+    const pick = (d) => (this.fields ? Object.fromEntries(this.fields.filter((f) => f in d).map((f) => [f, d[f]])) : d);
+    const out = (this.max ? docs.slice(0, this.max) : docs).map(({ id, d }) => ({ id, data: () => structuredClone(pick(d)) }));
     return { docs: out, empty: out.length === 0 };
   }
 }
