@@ -125,6 +125,33 @@ function createRepository(db, { now = () => new Date() } = {}) {
       await db.doc(`outbox/${id}`).set(stripUndefined(patch), { merge: true });
     },
 
+    /**
+     * Data retention: deletes cases last updated before `updatedBy` that never got past `stages`
+     * (abandoned conversations), with their audit events and the customer record pointing to them.
+     * Returns [{ tenantId, caseId }]. Walks insurer by insurer (single-field index, no collection group).
+     */
+    async deleteAbandonedCases({ updatedBefore, stages, limit = 500 }) {
+      const deleted = [];
+      const tenants = await db.collection('tenants').get();
+      for (const t of tenants.docs) {
+        if (deleted.length >= limit) break;
+        const snap = await db.collection(`tenants/${t.id}/cases`).where('updatedAt', '<=', updatedBefore).limit(limit - deleted.length).get();
+        for (const d of snap.docs) {
+          const c = d.data();
+          if (!c.flow || !stages.includes(c.flow.stage)) continue;
+          const events = await eventsCol(t.id, d.id).get();
+          for (const e of events.docs) await db.doc(`tenants/${t.id}/cases/${d.id}/events/${e.id}`).delete();
+          if (c.customerId) {
+            const cust = await customerRef(t.id, c.customerId).get();
+            if (cust.exists && cust.data().activeCaseId === d.id) await customerRef(t.id, c.customerId).delete();
+          }
+          await caseRef(t.id, d.id).delete();
+          deleted.push({ tenantId: t.id, caseId: d.id });
+        }
+      }
+      return deleted;
+    },
+
     /** Web chat has no push channel: the client polls and receives queued messages in order. */
     async takePendingWebMessages(tenantId, customerId) {
       const snap = await db.collection('outbox')

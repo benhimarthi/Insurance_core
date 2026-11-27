@@ -15,13 +15,14 @@ The code is being organised as feature modules following clean architecture: see
 | `src/policy`, `src/payment` | Quote to payment to policy PDF; webhook signature verification |
 | `src/verification` | QR verification links: unguessable codes, public read-only view |
 | `src/modules/auth` | Auth module (clean architecture): roles, permissions, invitations, member management, audit of access changes |
+| `src/modules/conversation` | Conversation module: chat flow, questions, AI extractor, receiving messages, web chat (`webchat` function) |
 | `src/modules/tenants` | Tenants module: insurers (create, rename, suspend), their rules JSON (validated, versioned, restorable), the tenant loader |
 | `src/shared` | Shared kernel: errors, identifier formats, hashing helpers |
 | `src/server` | Framework-agnostic handlers, Firestore repository, outbox (not yet split into modules) |
 | `src/channels`, `src/adapters` | WaSender, Gemini, storage, demo payment, policy numbering |
 | `index.js` | Cloud Functions entry (thin HTTP adapter) |
 | `dashboard/` | Dashboard login and tenant switcher (own `package.json` and tests, see its README) |
-| `web/` | Staff web app on Firebase Hosting: login, members, insurer settings and rules editor, platform page |
+| `web/` | On Firebase Hosting: the staff web app (`/`) and the customer chat page (`/chat/{tenantId}`) |
 
 ## Deploy module by module
 Firebase project: `my-super-manager-app` (`.firebaserc`). `ENABLED_MODULES` in `.env.my-super-manager-app`
@@ -73,6 +74,46 @@ Then:
   lets them rename, flag as demo, suspend/reactivate and issue a new web chat key (shown once).
 Insurers created before versioning (for example with `npm run seed`) start at revision 0.
 
+## Web chat (conversation module)
+Customers chat at `https://my-super-manager-app.web.app/chat/{tenantId}` (for example `/chat/demo-insurer`):
+questions, documents, then a quote or a referral to an underwriter. Real insurers need their web chat key
+(`?key=...`, from "Insurer and rules" > Management); demo insurers are open. On a demo insurer, `?demo=1`
+adds a "Demo documents" button (sample ID and registration, no real files needed).
+Without the payment module, an accepted quote ends with "we are preparing your contract": the insurer follows up.
+
+One-time setup before deploying it (`ENABLED_MODULES` contains `conversation`):
+1. Gemini API key: https://aistudio.google.com/apikey (same Google account), then in Cloud Shell:
+   `firebase functions:secrets:set GEMINI_API_KEY --project my-super-manager-app`
+2. Pepper for pseudonymous customer ids (never change it later):
+   `openssl rand -hex 32 | firebase functions:secrets:set PHONE_PEPPER --data-file=- --project my-super-manager-app`
+3. Firebase console > Storage > Get started (the bucket that keeps customer documents).
+4. IAM: give the `github-deployer` service account the **Secret Manager Admin** role (the deploy lets the
+   function read its two secrets).
+5. `GEMINI_MODEL` in `.env.my-super-manager-app` picks the model; change it there if Google retires it.
+6. Google Cloud console > APIs & Services: enable **Cloud Scheduler** (the nightly data-retention job), and
+   give `github-deployer` the **Cloud Scheduler Admin** role if the deploy asks for it.
+7. Firestore > TTL: add a policy on field `expireAt` for collection group `rateLimits` (as for `outbox` and `dedupe`).
+
+### Web chat security
+- **Abuse limits** (`src/modules/conversation/domain/limits.js`), counted in Firestore across all instances:
+  per session 20 messages/minute and 300/day, per IP 60/minute and 1,500/day, per insurer 5,000/day (the hard
+  cost ceiling); polls 40/minute per session. Over the limit: HTTP 429 with `Retry-After`, before any AI call.
+  IPs and sessions are pseudonymized (HMAC with `PHONE_PEPPER`) before they are counted.
+- **App Check**: Firebase console > App Check > register the web app with **reCAPTCHA Enterprise**, put the site key
+  in `web/.env` (`VITE_RECAPTCHA_SITE_KEY`), deploy with `WEBCHAT_APP_CHECK=monitor`, check the logs for
+  "App Check token" warnings, then switch to `enforce`.
+- **Origins**: browsers may call the web chat only from `https://<project>.web.app` and `.firebaseapp.com`.
+- **Uploads**: at most 3 files of 5 MB, JPEG/PNG/WebP/PDF, checked by their content (not the declared type), kept only
+  while documents are expected, under `uploads/`.
+- **Retention** (`domain/retention.js`, job `conversationCleanup` every night): uploads deleted after 90 days;
+  conversations abandoned before a quote or a referral deleted after 30 days with their events and customer record.
+  Cases that reached a quote, a human or a policy are kept.
+- **Duplicates** are detected per customer and message id.
+- **The chat page** forgets a conversation untouched for 24 hours (shared computers); Hosting sends a
+  Content-Security-Policy, `X-Frame-Options: DENY` and a Permissions-Policy.
+- **Gemini and personal data**: use a **paid** Gemini API key (or Vertex AI) before real customers: on the free tier,
+  Google may use the content (ID cards included) to improve its products. Check your CNDP (law 09-08) obligations.
+
 ## Run the tests
 `npm install && npm test` (no Firebase project or emulator needed: a strict Firestore double is used).
 
@@ -87,7 +128,7 @@ Insurers created before versioning (for example with `npm run seed`) start at re
 7. People and roles (see "Authentication and roles" below): make yourself platform admin with
    `node scripts/grant-platform-role.js <uid> platform_admin`, create the insurer's first admin with
    `node scripts/add-member.js demo-insurer <uid> tenant_admin <email>`, then invite everyone else from the dashboard.
-8. Firestore TTL: enable it on the `expireAt` field for collections `outbox` and `dedupe`.
+8. Firestore TTL: enable it on the `expireAt` field for collections `outbox`, `dedupe` and `rateLimits`.
 9. Cloud Storage: the runtime service account needs "Service Account Token Creator" to sign URLs.
 
 ## Before real customer data

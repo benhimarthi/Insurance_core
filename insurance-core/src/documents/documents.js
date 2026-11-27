@@ -1,6 +1,6 @@
 'use strict';
 
-const { tokenize } = require('../conversation/nlu');
+const { nlu: { tokenize } } = require('../modules/conversation');
 
 /**
  * Document verification, independent of the OCR/vision provider.

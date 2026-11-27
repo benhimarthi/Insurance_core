@@ -3,9 +3,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { config, FRENCH_ANSWERS, doc, converse } = require('./helpers');
-const { assertQuestionsCoverConfig } = require('../src/conversation/questions');
-const { createLlmExtractor } = require('../src/adapters/extractor');
-const { CASE_STATUS } = require('../src/models/schemas');
+const { assertQuestionsCoverConfig, createLlmExtractor } = require('../src/modules/conversation');
+const { CASE_STATUS } = require('../src/shared/cases');
 
 test('config and question catalogue are consistent', () => {
   assertQuestionsCoverConfig(config);

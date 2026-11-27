@@ -1,7 +1,9 @@
 'use strict';
 
 /**
- * Data model for the generic underwriting assistant (multi-tenant).
+ * The case record: the one contract every module shares (conversation, underwriting, documents,
+ * payment, policy). Statuses, audit events and the human-decision rule live here so all modules
+ * agree on them. Keep it about the record itself, never about how a module does its job.
  *
  * Firestore layout (every document lives under a tenant = one insurer / one demo):
  *
@@ -124,4 +126,10 @@ function applyHumanDecision(caseDoc, { reviewerId, decision, adjustedPremium, no
   };
 }
 
-module.exports = { CASE_STATUS, ACTOR, EVENT, paths, newCase, newEvent, caseStatusFromEngine, applyHumanDecision };
+/** The premium the customer pays: the underwriter's adjusted amount, else the engine's. */
+function finalPremium(caseDoc) {
+  if (caseDoc.review && caseDoc.review.decision === 'adjust') return caseDoc.review.adjustedPremium;
+  return caseDoc.engineResult && caseDoc.engineResult.premium ? caseDoc.engineResult.premium.total : null;
+}
+
+module.exports = { CASE_STATUS, ACTOR, EVENT, paths, newCase, newEvent, caseStatusFromEngine, applyHumanDecision, finalPremium };

@@ -6,7 +6,7 @@ const { config, NOW, FRENCH_ANSWERS, doc, converse } = require('./helpers');
 const { createLlmDocumentProcessor } = require('../src/adapters/documentProcessor');
 const { acceptDocument, nameSimilarity, yearsBetween, parseDate } = require('../src/documents/documents');
 const { evaluateCase } = require('../src/rules/engine');
-const { CASE_STATUS } = require('../src/models/schemas');
+const { CASE_STATUS } = require('../src/shared/cases');
 
 test('after the last question the agent asks for both documents', async () => {
   const { caseDoc, replies } = await converse(FRENCH_ANSWERS);

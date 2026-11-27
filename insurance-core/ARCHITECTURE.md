@@ -36,8 +36,14 @@ with side effects goes behind a port. Code outside a module imports it only thro
 - **D**: use cases receive their ports as arguments; only `index.js` knows the concrete classes.
 
 ## Shared kernel
-`src/shared/` holds what every module may use and that has no business meaning: `AppError`,
-identifier formats, hashing helpers, `stripUndefined` for Firestore. Keep it small.
+`src/shared/` holds what every module may use: `AppError`, identifier formats, hashing helpers,
+`stripUndefined` for Firestore, and `cases.js`, the case record every module shares (statuses, audit
+events, the human-decision rule, the final premium). Keep it small.
+
+## Ports between modules, before the other modules exist
+The conversation module asks for `underwriting` (the rules engine), `documents` (document checks) and
+`payments` through ports. Until those are modules, `src/server/conversationPorts.js` plugs the existing
+code in; each future module will provide its port from its own `index.js`, and only the wiring changes.
 
 ## Modules
 
@@ -45,7 +51,7 @@ identifier formats, hashing helpers, `stripUndefined` for Firestore. Keep it sma
 |---|---|---|
 | `auth` | **done** | roles, permissions, authorization, invitations, member management, access audit trail. Deployable alone (`members` function, no secrets) |
 | `tenants` | **done** | insurers (create, rename, demo flag, suspend, web chat key), rules JSON validated, versioned and restorable, tenant loader. Function `tenants`, no secrets |
-| `conversation` | planned | chat flow, questions, NLU, messages (`src/conversation`), WhatsApp and web chat channels |
+| `conversation` | **done** (web chat) | the chat flow, questions, NLU, messages, AI extractor, receiving messages from any channel, web chat. Function `webchat` (secrets: `GEMINI_API_KEY`, `PHONE_PEPPER`). WhatsApp still in `src/server/app.js`, on top of the module |
 | `underwriting` | planned | rules engine (`src/rules`), referrals and underwriter decisions |
 | `documents` | planned | ID and registration checks (`src/documents`, document processor adapters) |
 | `payment` | planned | payment links, webhook verification, demo checkout (`src/payment`, payment adapters) |
@@ -83,6 +89,35 @@ src/modules/auth/
 Public API (`require('./src/modules/auth')`): `createAuthModule`, `ROLES`, `PERMISSIONS`, `TENANT_ROLES`,
 `can`, `isTenantRole`, `isPlatformRole`, `INVITE_TTL_MS`. Other modules use `authModule.authorize()`
 (for example the underwriter decision checks `case:decide`).
+
+## The conversation module
+
+```
+src/modules/conversation/
+  index.js                          createConversationModule({ extractor, underwriting, documents, payments?, store, uploads, tenants, pepper })
+  domain/
+    questions.js                    the question catalogue (fr / en / darija) and value validation
+    messages.js                     customer-facing texts (payment and policy use PAY through index.js)
+    nlu.js                          language detection, numbers, yes/no, choices, "I want a human"
+    inbound.js                      upload limits and content check, web session format, when a case is finished
+    limits.js                       abuse limits of the web chat (per session, IP, insurer)
+    retention.js                    how long uploads and abandoned conversations are kept
+  application/
+    ports.js                        Extractor, Underwriting, Documents, Payments, CaseStore, Uploads, TenantLoader, CustomerIds, Delivery
+    flow.js                         makeFlow(ports): the conversation state machine
+    useCases/handleInbound.js       one message from any channel: dedupe, uploads, flow, one atomic commit, then delivery
+    useCases/webChat.js             the web chat: key, session, abuse limits, collect queued replies
+    useCases/cleanup.js             nightly data retention
+  infrastructure/
+    extractors.js                   LLM extractor (Gemini) and the offline rule-based one
+    hmacCustomerIds.js              pseudonymous customer ids (HMAC with PHONE_PEPPER)
+    firestoreRateLimiter.js         fixed-window counters shared by all instances
+  interface/
+    webChatHttp.js                  App Check gate (off / monitor / enforce), error codes -> HTTP answers
+```
+
+The customer page is `web/chat.html` (`/chat/{tenantId}` on Firebase Hosting). It calls `/api/webchat/{tenantId}`,
+which Hosting forwards to the `webchat` function (same origin, no CORS).
 
 ## The tenants module
 

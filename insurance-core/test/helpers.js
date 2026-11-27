@@ -1,10 +1,10 @@
 'use strict';
 
 const config = require('../config/tenants/demo-insurer/motor.json');
-const { handleMessage } = require('../src/conversation/flow');
-const { createMockExtractor } = require('../src/adapters/extractor');
+const { makeFlow, createMockExtractor } = require('../src/modules/conversation');
+const { legacyConversationPorts } = require('../src/server/conversationPorts');
 const { createMockDocumentProcessor } = require('../src/adapters/documentProcessor');
-const { newCase } = require('../src/models/schemas');
+const { newCase } = require('../src/shared/cases');
 
 const NOW = new Date('2026-11-21T10:00:00Z'); // fixed clock: dates in fixtures stay valid
 
@@ -26,14 +26,12 @@ async function converse(items, {
   start,
 } = {}) {
   let caseDoc = start || newCase({ id: 'case-1', tenantId: 'demo-insurer', channel: 'whatsapp', customerId: 'cust-1' });
+  const flow = makeFlow({ extractor, ...legacyConversationPorts({ documentProcessor, paymentAdapter }) });
   const replies = [];
   const events = [];
   for (const item of items) {
     const input = typeof item === 'string' ? { text: item } : item;
-    const out = await handleMessage({
-      caseDoc, message: input.text || '', attachments: input.attachments || [],
-      config: cfg, extractor, documentProcessor, paymentAdapter, now: NOW,
-    });
+    const out = await flow({ caseDoc, message: input.text || '', attachments: input.attachments || [], config: cfg, now: NOW });
     caseDoc = out.caseDoc;
     replies.push(...out.replies);
     events.push(...out.events);

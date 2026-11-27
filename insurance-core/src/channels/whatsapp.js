@@ -90,7 +90,8 @@ function createMemoryChannel({ secret = 'test-secret' } = {}) {
       if (channel.failNext > 0) { channel.failNext -= 1; throw new Error('send failed'); }
       channel.sent.push({ kind: 'document', to, ...doc });
     },
-    async downloadMedia() { return Buffer.from('fake-image-bytes'); },
+    // a real JPEG header: uploads are checked by content, not by declared type
+    async downloadMedia() { return Buffer.concat([Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]), Buffer.from('fake-jpeg-body')]); },
     texts: () => channel.sent.filter((s) => s.kind === 'text').map((s) => s.text),
   };
   return channel;

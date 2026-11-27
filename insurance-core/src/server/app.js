@@ -1,7 +1,8 @@
 'use strict';
 
-const { handleMessage } = require('../conversation/flow');
-const { newCase, applyHumanDecision } = require('../models/schemas');
+const { createConversationModule } = require('../modules/conversation');
+const { applyHumanDecision } = require('../shared/cases');
+const { legacyConversationPorts } = require('./conversationPorts');
 const { notifyHumanDecision, handlePaymentEvent } = require('../policy/lifecycle');
 const { parseWebhook } = require('../payment/webhook');
 const { deliverOutbox } = require('./outbox');
@@ -9,7 +10,7 @@ const { renderPayPage, SECURITY_HEADERS } = require('./demoPayPage');
 const { renderVerifyPage, VERIFY_HEADERS } = require('./verifyPage');
 const { publicView, POLICY_NUMBER_RE, CODE_RE } = require('../verification/verification');
 const { isoDate } = require('../policy/policy');
-const { TENANT_ID_RE, ID_RE, AppError, sha256, newId, customerKey, safeEqual } = require('./util');
+const { TENANT_ID_RE, ID_RE, AppError } = require('./util');
 
 /**
  * Framework-agnostic handlers. index.js adapts Express requests to these plain inputs, and the
@@ -22,22 +23,11 @@ const { TENANT_ID_RE, ID_RE, AppError, sha256, newId, customerKey, safeEqual } =
  *   - a policy is only issued by the payment path, and only for approved cases (see lifecycle.js)
  */
 
-const ISSUED_WINDOW_MS = 24 * 3600 * 1000; // after issuance the chat stays on the same case for a day
-const MAX_ATTACHMENTS = 3;
-const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
-const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
-const MAX_TEXT_LENGTH = 1000;
-
 function buildApp({
   repo, loadTenant, channel, extractor, documentProcessor, paymentAdapter, policyAdmin, storage,
   paymentSecret, pepper, authService, demoPay = null, verifier = null, now = () => new Date(), logger = console,
 }) {
   const textEntry = (text) => ({ kind: 'text', text });
-
-  const isTerminal = (c) => !!c.flow && (
-    c.flow.stage === 'closed' ||
-    (c.flow.stage === 'issued' && now().getTime() - new Date(c.updatedAt).getTime() > ISSUED_WINDOW_MS)
-  );
 
   async function deliver(outbox) {
     try {
@@ -47,63 +37,19 @@ function buildApp({
     }
   }
 
-  /** Stores accepted uploads and returns the attachments the flow can process (bytes stay in memory). */
-  async function collectAttachments({ tenant, tenantId, caseId, inbound }) {
-    const out = [];
-    const list = (inbound.attachments || []).slice(0, MAX_ATTACHMENTS);
-    for (let i = 0; i < list.length; i += 1) {
-      const att = list[i];
-      if (!ALLOWED_MIME.includes(att.mimeType)) continue;
-      const bytes = att.data ? Buffer.from(att.data) : await channel.downloadMedia(att);
-      if (!bytes || bytes.length === 0 || bytes.length > MAX_UPLOAD_BYTES) continue;
-      const storagePath = `tenants/${tenantId}/cases/${caseId}/uploads/${sha256(inbound.messageId).slice(0, 12)}-${i}`;
-      await storage.save(storagePath, bytes, att.mimeType);
-      out.push({
-        storagePath, mimeType: att.mimeType, filename: att.filename || null, data: bytes,
-        ...(tenant.demo && att.demoFixture ? { demoFixture: att.demoFixture } : {}), // demo scenarios only
-      });
-    }
-    return out;
-  }
-
-  /** inbound: { messageId, from, text, attachments, channel: 'whatsapp' | 'web' } */
-  async function processInbound({ tenantId, tenant, config, inbound }) {
-    const customerId = customerKey(pepper, inbound.from);
-    const customer = await repo.getCustomer(tenantId, customerId);
-
-    let caseId = customer && customer.activeCaseId;
-    let existing = caseId ? await repo.getCase(tenantId, caseId) : null;
-    if (!existing || isTerminal(existing)) {
-      caseId = newId();
-      existing = null;
-    }
-
-    // Only keep uploads while the flow is actually waiting for documents.
-    const attachments = existing && existing.flow && existing.flow.stage === 'documents'
-      ? await collectAttachments({ tenant, tenantId, caseId, inbound })
-      : [];
-
-    const result = await repo.transact({
-      tenantId, caseId, customerId,
-      dedupe: { kind: 'msg', id: inbound.messageId },
-      compute: async ({ caseDoc }) => {
-        const base = caseDoc || newCase({ id: caseId, tenantId, channel: inbound.channel, customerId });
-        const out = await handleMessage({
-          caseDoc: base, message: inbound.text || '', attachments, config,
-          extractor, documentProcessor, paymentAdapter, now: now(),
-        });
-        return {
-          caseDoc: out.caseDoc,
-          events: out.events,
-          outbox: out.replies.map(textEntry),
-          customerPatch: { contact: inbound.from, channel: inbound.channel, activeCaseId: caseId, language: out.caseDoc.language || null, lastInboundAt: now().toISOString() },
-        };
-      },
-    });
-
-    if (!result.duplicate && inbound.channel !== 'web') await deliver(result.outbox);
-    return result;
-  }
+  // Conversation module: receiving messages from any channel, and the web chat.
+  const conversation = createConversationModule({
+    extractor,
+    ...legacyConversationPorts({ documentProcessor, paymentAdapter }),
+    store: repo,
+    uploads: storage,
+    tenants: { load: loadTenant },
+    delivery: { send: deliver, downloadMedia: (att) => channel.downloadMedia(att) },
+    pepper,
+    now,
+    logger,
+  });
+  const processInbound = conversation.handleInbound;
 
   // ---------- WhatsApp ----------
 
@@ -125,44 +71,9 @@ function buildApp({
     return { status: failed ? 500 : 200, body: { ok: !failed } };
   }
 
-  // ---------- Web chat (demo front end) ----------
+  // ---------- Web chat: the conversation module ----------
 
-  async function handleWebChat({ tenantId, headers, body }) {
-    const loaded = await loadTenant(tenantId);
-    if (!loaded) return { status: 404, body: { error: 'unknown_tenant' } };
-    const { tenant } = loaded;
-
-    if (tenant.webchatKey) {
-      if (!safeEqual(headers && headers['x-webchat-key'], tenant.webchatKey)) return { status: 401, body: { error: 'bad_key' } };
-    } else if (!tenant.demo) {
-      return { status: 401, body: { error: 'webchat_not_enabled' } }; // open web chat only for demo tenants
-    }
-
-    const { sessionId, text, attachments, messageId, poll } = body || {};
-    if (typeof sessionId !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(sessionId)) return { status: 400, body: { error: 'bad_session' } };
-    const from = `web:${sessionId}`;
-
-    if (!poll) {
-      if (typeof text !== 'string' || text.length > MAX_TEXT_LENGTH) return { status: 400, body: { error: 'bad_text' } };
-      if (messageId !== undefined && !ID_RE.test(messageId)) return { status: 400, body: { error: 'bad_message_id' } };
-      const files = (Array.isArray(attachments) ? attachments : []).map((a) => ({
-        mimeType: a.mimeType, filename: a.filename, demoFixture: a.demoFixture,
-        data: typeof a.dataBase64 === 'string' ? Buffer.from(a.dataBase64, 'base64') : undefined,
-      }));
-      await processInbound({ tenantId, ...loaded, inbound: { messageId: messageId || newId(), from, text, attachments: files, channel: 'web' } });
-    }
-
-    const pending = await repo.takePendingWebMessages(tenantId, customerKey(pepper, from));
-    const messages = [];
-    for (const m of pending) {
-      if (m.kind === 'document') {
-        messages.push({ kind: 'document', filename: m.document.filename, url: await storage.getSignedUrl(m.document.path, 15 * 60 * 1000), text: m.text || null });
-      } else {
-        messages.push({ kind: 'text', text: m.text });
-      }
-    }
-    return { status: 200, body: { messages } };
-  }
+  const handleWebChat = conversation.handleWebChat;
 
   // ---------- Payment webhook ----------
 
