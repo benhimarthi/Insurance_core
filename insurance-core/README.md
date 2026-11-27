@@ -36,7 +36,8 @@ One-time setup:
 1. Firebase console: Blaze plan; **Firestore** database `(default)` (region `eur3` or `europe-west1`);
    **Authentication** > Sign-in method > **Email/Password** enabled.
 2. As project owner, enable these APIs once (Google Cloud console > APIs & Services > Library): Cloud Functions,
-   Cloud Build, Artifact Registry, Cloud Run Admin, Eventarc, Pub/Sub, Firebase Hosting. The deploy account
+   Cloud Build, Artifact Registry, Cloud Run Admin, Eventarc, Pub/Sub, Firebase Hosting, Firebase Extensions,
+   Secret Manager, Cloud Resource Manager. The deploy account
    cannot enable APIs itself (unless you also give it Service Usage Admin).
 3. Google Cloud console > IAM > Service accounts: create `github-deployer` with the roles
    **Firebase Admin**, **Cloud Functions Admin**, **Service Account User** and **Service Usage Consumer**,
