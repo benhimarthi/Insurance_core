@@ -7,7 +7,7 @@ const TEXT = {
     attach: 'Joindre un document', demoDocs: 'Documents de démonstration', restart: 'Nouvelle conversation', start: 'Bonjour',
     hello: 'Écrivez « Bonjour » pour commencer.', you: 'Vous', bot: 'Assistant', sending: 'Envoi…', typing: 'L’assistant répond…',
     tooBig: 'Fichier trop lourd (5 Mo maximum).', badType: 'Format accepté : photo (JPEG, PNG, WebP) ou PDF.',
-    errors: { network: 'Connexion impossible. Vérifiez votre réseau et réessayez.', unknown_tenant: 'Ce chat n’existe pas.', webchat_not_enabled: 'Ce chat n’est pas encore ouvert.', bad_key: 'Ce chat n’est pas accessible.', default: 'Une erreur est survenue. Réessayez.' },
+    errors: { network: 'Connexion impossible. Vérifiez votre réseau et réessayez.', unknown_tenant: 'Ce chat n’existe pas.', webchat_not_enabled: 'Ce chat n’est pas encore ouvert.', bad_key: 'Ce chat n’est pas accessible.', app_check_failed: 'Ce navigateur n’a pas pu être vérifié. Rechargez la page.', rate_limited: 'Trop de messages d’un coup. Patientez un instant puis réessayez.', default: 'Une erreur est survenue. Réessayez.' },
     restartConfirm: 'Recommencer une nouvelle conversation ?', privacy: 'Vos réponses servent uniquement à établir votre devis.',
   },
   en: {
@@ -15,7 +15,7 @@ const TEXT = {
     attach: 'Attach a document', demoDocs: 'Demo documents', restart: 'New conversation', start: 'Hello',
     hello: 'Write “Hello” to start.', you: 'You', bot: 'Assistant', sending: 'Sending…', typing: 'The assistant is replying…',
     tooBig: 'File too large (5 MB maximum).', badType: 'Accepted: photo (JPEG, PNG, WebP) or PDF.',
-    errors: { network: 'Cannot connect. Check your network and try again.', unknown_tenant: 'This chat does not exist.', webchat_not_enabled: 'This chat is not open yet.', bad_key: 'This chat is not available.', default: 'Something went wrong. Please try again.' },
+    errors: { network: 'Cannot connect. Check your network and try again.', unknown_tenant: 'This chat does not exist.', webchat_not_enabled: 'This chat is not open yet.', bad_key: 'This chat is not available.', app_check_failed: 'This browser could not be verified. Reload the page.', rate_limited: 'Too many messages at once. Wait a moment and try again.', default: 'Something went wrong. Please try again.' },
     restartConfirm: 'Start a new conversation?', privacy: 'Your answers are only used to prepare your quote.',
   },
 };
@@ -23,6 +23,7 @@ const MAX_BYTES = 5 * 1024 * 1024;
 const TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
 const POLL_MS = 5000;
 const POLL_FOR_MS = 30 * 60 * 1000; // keep checking for replies (e.g. an underwriter's decision) for 30 minutes
+const KEEP_LOG_MS = 24 * 3600 * 1000; // on a shared computer, the next person must not read the conversation
 // 1x1 PNG: the demo documents only need a valid file; the scenario is in demoFixture (demo insurers only)
 const PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
@@ -40,21 +41,33 @@ function Linkified({ text }) {
     : <span key={i}>{p}</span>));
 }
 
-export function ChatApp({ tenantId, lang, demo, apiKey }) {
+export function ChatApp({ tenantId, lang, demo, apiKey, getAppCheckToken = null }) {
   const x = TEXT[lang] || TEXT.fr;
   const sessionKey = `chat.session.${tenantId}`;
   const logKey = (s) => `chat.log.${tenantId}.${s}`;
-  const [sessionId, setSessionId] = useState(() => store.get(sessionKey) || (() => { const s = randomId(); store.set(sessionKey, s); return s; })());
+  // a conversation untouched for 24 hours is forgotten by this browser (a new one starts)
+  const [sessionId, setSessionId] = useState(() => {
+    const saved = store.get(sessionKey);
+    const fresh = saved && typeof saved === 'object' && Date.now() - saved.at < KEEP_LOG_MS;
+    if (fresh) return saved.id;
+    if (saved) store.del(logKey(typeof saved === 'object' ? saved.id : saved));
+    const s = randomId();
+    store.set(sessionKey, { id: s, at: Date.now() });
+    return s;
+  });
   const [log, setLog] = useState(() => store.get(logKey(sessionId)) || []);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const api = useRef(createChatApi({ tenantId, key: apiKey })).current;
+  const api = useRef(createChatApi({ tenantId, key: apiKey, getAppCheckToken })).current;
   const end = useRef(null);
   const fileInput = useRef(null);
   const lastActivity = useRef(Date.now());
 
-  useEffect(() => { store.set(logKey(sessionId), log.slice(-200)); }, [log, sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    store.set(logKey(sessionId), log.slice(-200));
+    store.set(sessionKey, { id: sessionId, at: Date.now() }); // activity keeps it for another 24 hours
+  }, [log, sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { end.current && end.current.scrollIntoView({ block: 'end', behavior: 'smooth' }); }, [log, busy]);
 
   const addBot = (messages) => { if (messages.length) setLog((l) => [...l, ...messages.map((m) => ({ from: 'bot', ...m }))]); };
@@ -115,7 +128,7 @@ export function ChatApp({ tenantId, lang, demo, apiKey }) {
     if (log.length && !window.confirm(x.restartConfirm)) return;
     store.del(logKey(sessionId));
     const s = randomId();
-    store.set(sessionKey, s);
+    store.set(sessionKey, { id: s, at: Date.now() });
     setSessionId(s); setLog([]); setError(null);
   };
 

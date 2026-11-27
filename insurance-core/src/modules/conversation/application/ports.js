@@ -28,10 +28,18 @@
  * @property {(args: {tenantId, caseId, customerId, dedupe, compute}) => Promise<{duplicate, caseDoc?, outbox?}>} transact
  *   optimistic: compute() runs outside the transaction, the commit re-checks the case version
  * @property {(tenantId, customerId) => Promise<object[]>} takePendingWebMessages
+ * @property {(args: {updatedBefore: string, stages: string[], limit: number}) => Promise<Array<{tenantId, caseId}>>} deleteAbandonedCases
+ *   deletes those cases, their audit events and the customer record pointing to them
  *
  * @typedef {object} Uploads            customer files (Cloud Storage)
  * @property {(path, bytes, mimeType) => Promise<void>} save
  * @property {(path, ttlMs) => Promise<string>} getSignedUrl
+ * @property {(prefix, before: Date) => Promise<number>} deleteOlderThan   files under prefix created before `before`
+ * @property {(prefix) => Promise<number>} deletePrefix
+ *
+ * @typedef {object} RateLimiter        counters shared by all instances (Firestore)
+ * @property {(buckets: Array<{key, limit, windowSec}>) => Promise<{allowed: boolean, retryAfterSec?: number}>} consume
+ *   all-or-nothing: counts the request in every bucket, or in none if one is full
  *
  * @typedef {object} TenantLoader       from the tenants module
  * @property {(tenantId) => Promise<{tenant, config}|null>} load

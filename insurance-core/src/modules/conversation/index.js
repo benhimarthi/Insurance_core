@@ -12,8 +12,10 @@
 const { makeFlow, nextQuestion } = require('./application/flow');
 const { makeHandleInbound } = require('./application/useCases/handleInbound');
 const { makeWebChat } = require('./application/useCases/webChat');
+const { makeCleanup } = require('./application/useCases/cleanup');
 const { createWebChatHttp } = require('./interface/webChatHttp');
 const { createHmacCustomerIds } = require('./infrastructure/hmacCustomerIds');
+const { createFirestoreRateLimiter } = require('./infrastructure/firestoreRateLimiter');
 const { createMockExtractor, createLlmExtractor } = require('./infrastructure/extractors');
 const { QUESTIONS, assertQuestionsCoverConfig } = require('./domain/questions');
 const { MESSAGES, DOC, PAY, t, quoteMessage } = require('./domain/messages');
@@ -21,27 +23,33 @@ const nlu = require('./domain/nlu');
 
 /**
  * Ports (application/ports.js): extractor, underwriting, documents, payments (optional), store,
- * uploads, tenants ({ load }), delivery (optional, push channels), and either customerIds or a pepper.
+ * uploads, tenants ({ load }), delivery (optional, push channels), rateLimiter (web chat abuse limits),
+ * appCheck ({ mode, verify }), and either customerIds or a pepper.
  */
 function createConversationModule({
   extractor, underwriting, documents, payments = null,
-  store, uploads, tenants, delivery = null,
+  store, uploads, tenants, delivery = null, rateLimiter = null, appCheck = { mode: 'off' },
   pepper, customerIds = createHmacCustomerIds(pepper),
   now = () => new Date(), logger = console,
 }) {
   const clock = { now };
   const flow = makeFlow({ extractor, underwriting, documents, payments });
   const handleInbound = makeHandleInbound({ flow, store, uploads, customerIds, delivery, clock, logger });
-  const webChat = makeWebChat({ tenants, handleInbound, store, uploads, customerIds });
+  const webChat = makeWebChat({ tenants, handleInbound, store, uploads, customerIds, rateLimiter });
   return {
-    handleInbound,                                   // any channel (WhatsApp uses it)
-    handleWebChat: createWebChatHttp(webChat),       // the web chat endpoint
+    handleInbound,                                                  // any channel (WhatsApp uses it)
+    handleWebChat: createWebChatHttp(webChat, { appCheck, logger }), // the web chat endpoint
     customerIdFor: (contact) => customerIds.keyFor(contact),
   };
 }
 
+/** The daily data-retention job on its own: it needs no AI, no secret, only the store and the files. */
+function createConversationCleanup({ store, uploads, now = () => new Date(), logger = console }) {
+  return makeCleanup({ store, uploads, clock: { now }, logger });
+}
+
 module.exports = {
-  createConversationModule,
+  createConversationModule, createConversationCleanup, createFirestoreRateLimiter,
   makeFlow, nextQuestion,                            // the flow on its own (tests, examples)
   createMockExtractor, createLlmExtractor,
   QUESTIONS, assertQuestionsCoverConfig,

@@ -26,12 +26,13 @@ const { initializeApp, getApps, getApp: getAdminApp } = require('firebase-admin/
 const { getAuth } = require('firebase-admin/auth');
 const { getFirestore } = require('firebase-admin/firestore');
 const { getStorage } = require('firebase-admin/storage');
+const { getAppCheck } = require('firebase-admin/app-check');
 
 const { buildProductionApp } = require('./src/server/production');
 const { resolveEnabledModules } = require('./src/server/enabledModules');
 const { createAuthModule } = require('./src/modules/auth');
 const { createTenantsModule, createTenantLoader } = require('./src/modules/tenants');
-const { createConversationModule, createLlmExtractor } = require('./src/modules/conversation');
+const { createConversationModule, createConversationCleanup, createFirestoreRateLimiter, createLlmExtractor } = require('./src/modules/conversation');
 const { legacyConversationPorts } = require('./src/server/conversationPorts');
 const { createRepository } = require('./src/server/repository');
 const { createGemini } = require('./src/adapters/gemini');
@@ -72,6 +73,8 @@ const SECRETS = moduleEnabled('app') ? secretsOf('app') : [];
 // Params, declared only when a module that uses them is enabled, like secrets (in a non-interactive
 // deploy the CLI wants a value in .env.<project> for every declared param).
 const GEMINI_MODEL = moduleEnabled('conversation') || moduleEnabled('app') ? defineString('GEMINI_MODEL', { default: 'gemini-2.5-flash' }) : null;
+// App Check on the web chat: off | monitor | enforce (see src/modules/conversation/interface/webChatHttp.js)
+const WEBCHAT_APP_CHECK = moduleEnabled('conversation') ? defineString('WEBCHAT_APP_CHECK', { default: 'off' }) : null;
 const PARAM = moduleEnabled('app') ? {
   GEMINI_MODEL,
   DEMO_PAYMENTS: defineString('DEMO_PAYMENTS', { default: 'false' }),
@@ -127,10 +130,29 @@ function getConversationModule() {
       store: createRepository(db),
       uploads: createFirebaseStorage(getStorage(firebaseApp()).bucket()),
       tenants: { load: createTenantLoader({ db, localDir: null }) },
+      rateLimiter: createFirestoreRateLimiter(db),
+      appCheck: {
+        mode: WEBCHAT_APP_CHECK.value(),
+        verify: async (token) => !!(await getAppCheck(firebaseApp()).verifyToken(token)),
+      },
       pepper: SECRET.PHONE_PEPPER.value(),
     });
   }
   return conversationModule;
+}
+
+/**
+ * The visitor's IP, for the per-IP limits (pseudonymized before use). Best effort: the first
+ * x-forwarded-for entry can be forged by a script, which is why session and per-insurer limits and
+ * App Check exist too.
+ */
+const clientIpOf = (req) => String((req.headers['x-forwarded-for'] || '').split(',')[0] || req.ip || '').trim() || null;
+
+/** Browsers may call the web chat only from the project's own Hosting sites (the chat page). */
+function hostingOrigins() {
+  let project = process.env.GCLOUD_PROJECT;
+  try { project = project || JSON.parse(process.env.FIREBASE_CONFIG || '{}').projectId; } catch { /* none */ }
+  return project ? [`https://${project}.web.app`, `https://${project}.firebaseapp.com`] : false;
 }
 
 let app;
@@ -213,8 +235,14 @@ if (moduleEnabled('tenants')) {
 // POST {webchat URL}/{tenantId}, or /api/webchat/{tenantId} through Firebase Hosting (same origin as the chat page)
 if (moduleEnabled('conversation')) {
   const tenantOf = (req) => { const s = segments(req); return s[0] === 'api' && s[1] === 'webchat' ? s[2] : s[0]; };
-  exports.webchat = onRequest({ secrets: secretsOf('conversation'), timeoutSeconds: 120, memory: '512MiB', cors: true },
-    respond(postOnly((req) => getConversationModule().handleWebChat({ tenantId: tenantOf(req), headers: req.headers, body: req.body }))));
+  exports.webchat = onRequest({ secrets: secretsOf('conversation'), timeoutSeconds: 120, memory: '512MiB', cors: hostingOrigins() },
+    respond(postOnly((req) => getConversationModule().handleWebChat({ tenantId: tenantOf(req), headers: req.headers, body: req.body, clientIp: clientIpOf(req) }))));
+
+  // Data retention, every night: old customer documents and abandoned conversations. No secret needed.
+  exports.conversationCleanup = onSchedule({ schedule: 'every day 03:17', timeZone: 'Africa/Casablanca', timeoutSeconds: 540 }, async () => {
+    const db = firestore();
+    await createConversationCleanup({ store: createRepository(db), uploads: createFirebaseStorage(getStorage(firebaseApp()).bucket()) })();
+  });
 }
 
 // ---------- the rest of the app (not yet split into modules): needs every secret ----------

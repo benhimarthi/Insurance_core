@@ -6,20 +6,22 @@ export class ChatError extends Error {
   constructor(code, status) { super(code); this.code = code; this.status = status; }
 }
 
-export function createChatApi({ tenantId, key = null, fetchImpl = (...a) => fetch(...a), base = '/api/webchat' }) {
+/** getAppCheckToken: optional async () => token (Firebase App Check), sent as x-firebase-appcheck. */
+export function createChatApi({ tenantId, key = null, getAppCheckToken = null, fetchImpl = (...a) => fetch(...a), base = '/api/webchat' }) {
   async function post(body) {
     let res;
     try {
+      const appCheck = getAppCheckToken ? await getAppCheckToken().catch(() => null) : null;
       res = await fetchImpl(`${base}/${encodeURIComponent(tenantId)}`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...(key ? { 'x-webchat-key': key } : {}) },
+        headers: { 'content-type': 'application/json', ...(key ? { 'x-webchat-key': key } : {}), ...(appCheck ? { 'x-firebase-appcheck': appCheck } : {}) },
         body: JSON.stringify(body),
       });
     } catch {
       throw new ChatError('network', 0);
     }
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new ChatError(data.error || 'server', res.status);
+    if (!res.ok) throw Object.assign(new ChatError(data.error || 'server', res.status), { retryAfterSec: data.retryAfterSec || null });
     return data.messages || [];
   }
   return {

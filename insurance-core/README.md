@@ -90,6 +90,29 @@ One-time setup before deploying it (`ENABLED_MODULES` contains `conversation`):
 4. IAM: give the `github-deployer` service account the **Secret Manager Admin** role (the deploy lets the
    function read its two secrets).
 5. `GEMINI_MODEL` in `.env.my-super-manager-app` picks the model; change it there if Google retires it.
+6. Google Cloud console > APIs & Services: enable **Cloud Scheduler** (the nightly data-retention job), and
+   give `github-deployer` the **Cloud Scheduler Admin** role if the deploy asks for it.
+7. Firestore > TTL: add a policy on field `expireAt` for collection group `rateLimits` (as for `outbox` and `dedupe`).
+
+### Web chat security
+- **Abuse limits** (`src/modules/conversation/domain/limits.js`), counted in Firestore across all instances:
+  per session 20 messages/minute and 300/day, per IP 60/minute and 1,500/day, per insurer 5,000/day (the hard
+  cost ceiling); polls 40/minute per session. Over the limit: HTTP 429 with `Retry-After`, before any AI call.
+  IPs and sessions are pseudonymized (HMAC with `PHONE_PEPPER`) before they are counted.
+- **App Check**: Firebase console > App Check > register the web app with **reCAPTCHA Enterprise**, put the site key
+  in `web/.env` (`VITE_RECAPTCHA_SITE_KEY`), deploy with `WEBCHAT_APP_CHECK=monitor`, check the logs for
+  "App Check token" warnings, then switch to `enforce`.
+- **Origins**: browsers may call the web chat only from `https://<project>.web.app` and `.firebaseapp.com`.
+- **Uploads**: at most 3 files of 5 MB, JPEG/PNG/WebP/PDF, checked by their content (not the declared type), kept only
+  while documents are expected, under `uploads/`.
+- **Retention** (`domain/retention.js`, job `conversationCleanup` every night): uploads deleted after 90 days;
+  conversations abandoned before a quote or a referral deleted after 30 days with their events and customer record.
+  Cases that reached a quote, a human or a policy are kept.
+- **Duplicates** are detected per customer and message id.
+- **The chat page** forgets a conversation untouched for 24 hours (shared computers); Hosting sends a
+  Content-Security-Policy, `X-Frame-Options: DENY` and a Permissions-Policy.
+- **Gemini and personal data**: use a **paid** Gemini API key (or Vertex AI) before real customers: on the free tier,
+  Google may use the content (ID cards included) to improve its products. Check your CNDP (law 09-08) obligations.
 
 ## Run the tests
 `npm install && npm test` (no Firebase project or emulator needed: a strict Firestore double is used).
@@ -105,7 +128,7 @@ One-time setup before deploying it (`ENABLED_MODULES` contains `conversation`):
 7. People and roles (see "Authentication and roles" below): make yourself platform admin with
    `node scripts/grant-platform-role.js <uid> platform_admin`, create the insurer's first admin with
    `node scripts/add-member.js demo-insurer <uid> tenant_admin <email>`, then invite everyone else from the dashboard.
-8. Firestore TTL: enable it on the `expireAt` field for collections `outbox` and `dedupe`.
+8. Firestore TTL: enable it on the `expireAt` field for collections `outbox`, `dedupe` and `rateLimits`.
 9. Cloud Storage: the runtime service account needs "Service Account Token Creator" to sign URLs.
 
 ## Before real customer data

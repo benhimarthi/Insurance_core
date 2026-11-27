@@ -19,9 +19,26 @@ const isTerminal = (c, now) => !!c.flow && (
 
 /** Uploads are only kept while the flow is actually waiting for documents. */
 const acceptsUploads = (c) => !!c && !!c.flow && c.flow.stage === 'documents';
-const isAllowedUpload = (mimeType, size) => ALLOWED_MIME.includes(mimeType) && size > 0 && size <= MAX_UPLOAD_BYTES;
+
+/**
+ * What a file really is, from its first bytes: the type a browser or a provider declares is not
+ * trusted. Returns one of ALLOWED_MIME, or null.
+ */
+function sniffMime(bytes) {
+  if (!bytes || bytes.length < 12) return null;
+  const b = bytes;
+  if (b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) return 'image/jpeg';
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47 && b[4] === 0x0D && b[5] === 0x0A && b[6] === 0x1A && b[7] === 0x0A) return 'image/png';
+  if (b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP') return 'image/webp';
+  if (b.toString('latin1', 0, 5) === '%PDF-') return 'application/pdf';
+  return null;
+}
+
+/** An upload is kept only if its declared type is allowed, its content IS that type, and its size fits. */
+const isAllowedUpload = (mimeType, bytes) => ALLOWED_MIME.includes(mimeType) && !!bytes
+  && bytes.length > 0 && bytes.length <= MAX_UPLOAD_BYTES && sniffMime(bytes) === mimeType;
 
 /** Web chat visitors have no phone number: their session id is their contact. */
 const webContact = (sessionId) => `web:${sessionId}`;
 
-module.exports = { MAX_ATTACHMENTS, MAX_UPLOAD_BYTES, ALLOWED_MIME, MAX_TEXT_LENGTH, SESSION_RE, isTerminal, acceptsUploads, isAllowedUpload, webContact };
+module.exports = { MAX_ATTACHMENTS, MAX_UPLOAD_BYTES, ALLOWED_MIME, MAX_TEXT_LENGTH, SESSION_RE, isTerminal, acceptsUploads, sniffMime, isAllowedUpload, webContact };

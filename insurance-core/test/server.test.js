@@ -259,7 +259,7 @@ test('web chat: customer gets the underwriter decision and the policy through po
   const env = makeEnv();
   const sessionId = 'sess-abcdef12';
   const call = (body) => env.app.handleWebChat({ tenantId: TENANT, headers: {}, body: { sessionId, ...body } });
-  const file = (demoFixture) => ({ mimeType: 'image/png', dataBase64: 'aGVsbG8=', demoFixture });
+  const file = (demoFixture) => ({ mimeType: 'image/png', dataBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', demoFixture }); // a real 1x1 PNG
 
   for (const text of FRENCH_ANSWERS) await call({ text });
   await call({ text: '', attachments: [file('demo_id_ok'), file('demo_registration_other_owner')] });
