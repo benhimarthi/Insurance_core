@@ -58,7 +58,12 @@ First people:
 
 ## Insurers and their rules (tenants module)
 Each insurer has a rules JSON per line (today `motor`): questions, eligibility, risk, tariff, documents, policy,
-payment, branding. In the web app, **Insurer and rules** shows it in a JSON editor:
+payment, branding. In the web app, **Insurer and rules** shows it two ways, editing the same draft:
+- **Form**: the values changed day to day (prices, fees, multipliers, risk points and thresholds, eligibility
+  outcomes and messages, city zones, documents, policy, payment, limits, branding); conditions are shown in plain
+  language, and errors appear under their field.
+- **JSON**: everything, including adding rules and changing conditions.
+Then:
 - **Check** runs the same validator as a save; errors are listed by path (`risk.referAt`, ...).
 - **Save** needs a reason and creates a new revision; a save based on an outdated revision is refused, so two
   people cannot overwrite each other. New conversations use the new rules within a minute (60 s cache).
