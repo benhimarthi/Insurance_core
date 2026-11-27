@@ -5,7 +5,8 @@
  * framework-agnostic handlers in src/server/app.js.
  *
  * Deploy:  firebase deploy --only functions,firestore
- * Params:  FIRESTORE_DATABASE_ID, GEMINI_MODEL, DEMO_PAYMENTS, DEMO_PAY_BASE_URL, USE_LOCAL_TENANTS, VERIFY_BASE_URL
+ * Params:  FIRESTORE_DATABASE_ID, GEMINI_MODEL, DEMO_PAYMENTS, DEMO_PAY_BASE_URL, USE_LOCAL_TENANTS, VERIFY_BASE_URL, REQUIRE_MFA
+ * Modules: ENABLED_MODULES (auth, app or all) selects which functions are defined, see below
  * Secrets: WASENDER_API_KEY, WASENDER_WEBHOOK_SECRET, PAYMENT_WEBHOOK_SECRET, PHONE_PEPPER, GEMINI_API_KEY, VERIFY_SECRET
  *          (firebase functions:secrets:set NAME)
  *
@@ -26,6 +27,7 @@ const { getFirestore } = require('firebase-admin/firestore');
 const { getStorage } = require('firebase-admin/storage');
 
 const { buildProductionApp } = require('./src/server/production');
+const { resolveEnabledModules } = require('./src/server/enabledModules');
 const { createAuthModule } = require('./src/modules/auth');
 const { AppError } = require('./src/server/util');
 
@@ -39,13 +41,27 @@ const USE_LOCAL_TENANTS = defineString('USE_LOCAL_TENANTS', { default: 'false' }
 const REQUIRE_MFA = defineString('REQUIRE_MFA', { default: 'true' }); // needs Identity Platform; keep true in production
 const VERIFY_BASE_URL = defineString('VERIFY_BASE_URL', { default: '' });
 
-const WASENDER_API_KEY = defineSecret('WASENDER_API_KEY');
-const WASENDER_WEBHOOK_SECRET = defineSecret('WASENDER_WEBHOOK_SECRET');
-const PAYMENT_WEBHOOK_SECRET = defineSecret('PAYMENT_WEBHOOK_SECRET');
-const PHONE_PEPPER = defineSecret('PHONE_PEPPER');
-const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
-const VERIFY_SECRET = defineSecret('VERIFY_SECRET');
-const SECRETS = [WASENDER_API_KEY, WASENDER_WEBHOOK_SECRET, PAYMENT_WEBHOOK_SECRET, PHONE_PEPPER, GEMINI_API_KEY, VERIFY_SECRET];
+/**
+ * Which modules this deployment defines functions for, from ENABLED_MODULES (comma separated, in
+ * .env.<project>): `auth`, `app` (everything not yet split into modules), or `all` (the default).
+ * See src/server/enabledModules.js for why it also reads the .env file itself.
+ * The Firebase CLI checks every secret index.js declares, even with `--only functions:<name>`, so a
+ * module whose secrets do not exist yet must not be defined at all.
+ */
+const ENABLED_MODULES = resolveEnabledModules({ dir: __dirname });
+const moduleEnabled = (name) => ENABLED_MODULES.includes('all') || ENABLED_MODULES.includes(name);
+
+// Secrets are declared only when a module that uses them is enabled: the CLI resolves every
+// declared secret before a deploy, and refuses it if one does not exist in Secret Manager.
+const SECRET = moduleEnabled('app') ? {
+  WASENDER_API_KEY: defineSecret('WASENDER_API_KEY'),
+  WASENDER_WEBHOOK_SECRET: defineSecret('WASENDER_WEBHOOK_SECRET'),
+  PAYMENT_WEBHOOK_SECRET: defineSecret('PAYMENT_WEBHOOK_SECRET'),
+  PHONE_PEPPER: defineSecret('PHONE_PEPPER'),
+  GEMINI_API_KEY: defineSecret('GEMINI_API_KEY'),
+  VERIFY_SECRET: defineSecret('VERIFY_SECRET'),
+} : null;
+const SECRETS = SECRET ? Object.values(SECRET) : [];
 
 const firebaseApp = () => (admin.apps.length ? admin.app() : admin.initializeApp());
 // Named database pattern: always pass the database id explicitly.
@@ -69,18 +85,18 @@ function getApp() {
       authModule: getAuthModule(),
       bucket: getStorage(firebaseApp()).bucket(),
       env: {
-        geminiApiKey: GEMINI_API_KEY.value(),
+        geminiApiKey: SECRET.GEMINI_API_KEY.value(),
         geminiModel: GEMINI_MODEL.value(),
-        wasenderApiKey: WASENDER_API_KEY.value(),
-        wasenderWebhookSecret: WASENDER_WEBHOOK_SECRET.value(),
-        paymentWebhookSecret: PAYMENT_WEBHOOK_SECRET.value(),
-        phonePepper: PHONE_PEPPER.value(),
+        wasenderApiKey: SECRET.WASENDER_API_KEY.value(),
+        wasenderWebhookSecret: SECRET.WASENDER_WEBHOOK_SECRET.value(),
+        paymentWebhookSecret: SECRET.PAYMENT_WEBHOOK_SECRET.value(),
+        phonePepper: SECRET.PHONE_PEPPER.value(),
         demoPaymentsEnabled: DEMO_PAYMENTS.value() === 'true',
         demoPayBaseUrl: DEMO_PAY_BASE_URL.value(),
         useLocalTenants: USE_LOCAL_TENANTS.value() === 'true',
         requireMfa: REQUIRE_MFA.value() !== 'false',
         verifyBaseUrl: VERIFY_BASE_URL.value(),
-        verifySecret: VERIFY_SECRET.value(),
+        verifySecret: SECRET.VERIFY_SECRET.value(),
       },
     });
   }
@@ -107,29 +123,6 @@ function respond(handler) {
 
 const postOnly = (fn) => (req) => (req.method === 'POST' ? fn(req) : { status: 405, body: { error: 'method_not_allowed' } });
 
-exports.whatsappWebhook = onRequest({ secrets: SECRETS, timeoutSeconds: 120, memory: '512MiB' },
-  respond(postOnly((req) => getApp().handleWhatsAppWebhook({ tenantId: segments(req)[0], headers: req.headers, body: req.body }))));
-
-exports.webchat = onRequest({ secrets: SECRETS, timeoutSeconds: 120, memory: '512MiB', cors: true },
-  respond(postOnly((req) => getApp().handleWebChat({ tenantId: segments(req)[0], headers: req.headers, body: req.body }))));
-
-exports.paymentWebhook = onRequest({ secrets: SECRETS, timeoutSeconds: 120, memory: '512MiB' },
-  respond(postOnly((req) => getApp().handlePaymentWebhook({ tenantId: segments(req)[0], rawBody: rawBodyOf(req), headers: req.headers }))));
-
-exports.demoPay = onRequest({ secrets: SECRETS, timeoutSeconds: 120, memory: '512MiB' },
-  respond((req) => {
-    if (!['GET', 'POST'].includes(req.method)) return { status: 405, body: { error: 'method_not_allowed' } };
-    const [tenantId, paymentId] = segments(req);
-    return getApp().handleDemoPay({ tenantId, paymentId, method: req.method });
-  }));
-
-// Public QR verification. GET /{tenantId}/{policyNumber}/{code}[?lang=en][&format=json]
-exports.verify = onRequest({ secrets: SECRETS, timeoutSeconds: 30, memory: '256MiB', maxInstances: 5 }, respond((req) => {
-  if (req.method !== 'GET') return { status: 405, body: { error: 'method_not_allowed' } };
-  const [tenantId, policyNumber, code] = segments(req);
-  return getApp().handleVerify({ tenantId, policyNumber, code, format: req.query.format === 'json' ? 'json' : 'html', lang: req.query.lang === 'en' ? 'en' : 'fr' });
-}));
-
 // Callables for the dashboard (Firebase SDK: httpsCallable(functions, name)(data)).
 const authOf = (request) => request.auth && { uid: request.auth.uid, token: request.auth.token };
 
@@ -145,17 +138,44 @@ function callable(handler, { secrets = SECRETS } = {}) {
   });
 }
 
-// { tenantId, caseId, decision: 'approve' | 'adjust' | 'reject', adjustedPremium?, note? }
-exports.underwriterDecision = callable((request) => getApp().handleUnderwriterDecision({
-  tenantId: request.data && request.data.tenantId, auth: authOf(request), data: request.data,
-}));
-
+// ---------- auth module: needs no secrets ----------
 // { action: 'myTenants' | 'allTenants' (platform only) | 'list' | 'invite' | 'accept' | 'revokeInvitation' | 'changeRole' | 'setStatus' | 'remove', tenantId, ... }
 // Platform staff must add `reason` on every action that targets an insurer.
-// Auth module only: no secrets, no other module loaded. Deploy alone with
-//   firebase deploy --only functions:members,firestore
-exports.members = callable((request) => getAuthModule().handle({ auth: authOf(request), data: request.data }), { secrets: [] });
+if (moduleEnabled('auth')) {
+  exports.members = callable((request) => getAuthModule().handle({ auth: authOf(request), data: request.data }), { secrets: [] });
+}
 
-exports.retryOutbox = onSchedule({ schedule: 'every 2 minutes', secrets: SECRETS, timeoutSeconds: 120 }, async () => {
-  await getApp().retryOutbox();
-});
+// ---------- the rest of the app (not yet split into modules): needs every secret ----------
+if (moduleEnabled('app')) {
+  exports.whatsappWebhook = onRequest({ secrets: SECRETS, timeoutSeconds: 120, memory: '512MiB' },
+    respond(postOnly((req) => getApp().handleWhatsAppWebhook({ tenantId: segments(req)[0], headers: req.headers, body: req.body }))));
+
+  exports.webchat = onRequest({ secrets: SECRETS, timeoutSeconds: 120, memory: '512MiB', cors: true },
+    respond(postOnly((req) => getApp().handleWebChat({ tenantId: segments(req)[0], headers: req.headers, body: req.body }))));
+
+  exports.paymentWebhook = onRequest({ secrets: SECRETS, timeoutSeconds: 120, memory: '512MiB' },
+    respond(postOnly((req) => getApp().handlePaymentWebhook({ tenantId: segments(req)[0], rawBody: rawBodyOf(req), headers: req.headers }))));
+
+  exports.demoPay = onRequest({ secrets: SECRETS, timeoutSeconds: 120, memory: '512MiB' },
+    respond((req) => {
+      if (!['GET', 'POST'].includes(req.method)) return { status: 405, body: { error: 'method_not_allowed' } };
+      const [tenantId, paymentId] = segments(req);
+      return getApp().handleDemoPay({ tenantId, paymentId, method: req.method });
+    }));
+
+  // Public QR verification. GET /{tenantId}/{policyNumber}/{code}[?lang=en][&format=json]
+  exports.verify = onRequest({ secrets: SECRETS, timeoutSeconds: 30, memory: '256MiB', maxInstances: 5 }, respond((req) => {
+    if (req.method !== 'GET') return { status: 405, body: { error: 'method_not_allowed' } };
+    const [tenantId, policyNumber, code] = segments(req);
+    return getApp().handleVerify({ tenantId, policyNumber, code, format: req.query.format === 'json' ? 'json' : 'html', lang: req.query.lang === 'en' ? 'en' : 'fr' });
+  }));
+
+  // { tenantId, caseId, decision: 'approve' | 'adjust' | 'reject', adjustedPremium?, note? }
+  exports.underwriterDecision = callable((request) => getApp().handleUnderwriterDecision({
+    tenantId: request.data && request.data.tenantId, auth: authOf(request), data: request.data,
+  }));
+
+  exports.retryOutbox = onSchedule({ schedule: 'every 2 minutes', secrets: SECRETS, timeoutSeconds: 120 }, async () => {
+    await getApp().retryOutbox();
+  });
+}

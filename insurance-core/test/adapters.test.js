@@ -176,3 +176,31 @@ test('index.js loads and exports the expected functions', { skip: !hasFirebase }
   const exported = Object.keys(require('../index.js')).sort();
   assert.deepStrictEqual(exported, ['demoPay', 'members', 'paymentWebhook', 'retryOutbox', 'underwriterDecision', 'verify', 'webchat', 'whatsappWebhook']);
 });
+
+test('index.js defines only the enabled modules (ENABLED_MODULES), so missing secrets of others do not block a deploy', { skip: !hasFirebase }, () => {
+  const load = (value) => {
+    const before = process.env.ENABLED_MODULES;
+    process.env.ENABLED_MODULES = value;
+    delete require.cache[require.resolve('../index.js')];
+    try { return Object.keys(require('../index.js')).sort(); } finally {
+      if (before === undefined) delete process.env.ENABLED_MODULES; else process.env.ENABLED_MODULES = before;
+      delete require.cache[require.resolve('../index.js')];
+    }
+  };
+  assert.deepStrictEqual(load('auth'), ['members']);
+  assert.deepStrictEqual(load('app'), ['demoPay', 'paymentWebhook', 'retryOutbox', 'underwriterDecision', 'verify', 'webchat', 'whatsappWebhook']);
+  assert.strictEqual(load('auth, app').length, 8);
+});
+
+test('enabled modules: from the environment, else from .env.<project> (as during the CLI analysis), else all', () => {
+  const fs = require('fs'); const os = require('os'); const path = require('path');
+  const { resolveEnabledModules } = require('../src/server/enabledModules');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mods-'));
+  fs.writeFileSync(path.join(dir, '.env.proj-a'), '# comment\nREQUIRE_MFA=false\nENABLED_MODULES= auth \n');
+  assert.deepStrictEqual(resolveEnabledModules({ env: { ENABLED_MODULES: 'auth,app' }, dir }), ['auth', 'app']);
+  assert.deepStrictEqual(resolveEnabledModules({ env: { GCLOUD_PROJECT: 'proj-a' }, dir }), ['auth']);
+  assert.deepStrictEqual(resolveEnabledModules({ env: { FIREBASE_CONFIG: JSON.stringify({ projectId: 'proj-a' }) }, dir }), ['auth']);
+  assert.deepStrictEqual(resolveEnabledModules({ env: { GCLOUD_PROJECT: 'other' }, dir }), ['all']);
+  assert.deepStrictEqual(resolveEnabledModules({ env: { GCLOUD_PROJECT: '../etc' }, dir }), ['all']);
+  assert.deepStrictEqual(resolveEnabledModules({ env: {}, dir }), ['all']);
+});

@@ -35,12 +35,16 @@ all three places, after enabling Identity Platform and TOTP, before any real cus
 One-time setup:
 1. Firebase console: Blaze plan; **Firestore** database `(default)` (region `eur3` or `europe-west1`);
    **Authentication** > Sign-in method > **Email/Password** enabled.
-2. Google Cloud console > IAM > Service accounts: create `github-deployer` with the roles
+2. As project owner, enable these APIs once (Google Cloud console > APIs & Services > Library): Cloud Functions,
+   Cloud Build, Artifact Registry, Cloud Run Admin, Eventarc, Pub/Sub, Firebase Hosting, Firebase Extensions,
+   Secret Manager, Cloud Resource Manager. The deploy account
+   cannot enable APIs itself (unless you also give it Service Usage Admin).
+3. Google Cloud console > IAM > Service accounts: create `github-deployer` with the roles
    **Firebase Admin**, **Cloud Functions Admin**, **Service Account User** and **Service Usage Consumer**,
    then Keys > Add key > JSON.
-3. GitHub repo > Settings > Secrets and variables > Actions: add `FIREBASE_SERVICE_ACCOUNT` with the whole JSON
+4. GitHub repo > Settings > Secrets and variables > Actions: add `FIREBASE_SERVICE_ACCOUNT` with the whole JSON
    file as value, then delete the file from your computer.
-4. Run the workflow. The web app is then at `https://my-super-manager-app.web.app`.
+5. Run the workflow. The web app is then at `https://my-super-manager-app.web.app`.
 
 First people:
 1. Firebase console > Authentication > Add user (your email). Sign in on the web app and verify your email.
