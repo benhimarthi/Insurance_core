@@ -30,6 +30,8 @@ selects which modules' functions exist: today `auth` (`members`) and `tenants` (
 secrets. The GitHub Actions workflow `.github/workflows/deploy.yml` runs all tests, then deploys those
 functions, the Firestore rules and indexes, and the staff web app (`web/`) to Firebase Hosting. It runs on
 every push to `main` that touches `insurance-core/`, or by hand (Actions tab > Deploy > Run workflow).
+If a deploy stopped halfway (for example a schedule was not created), run it by hand and put the function names in
+"Functions to redeploy" (e.g. `conversationCleanup`): the CLI skips unchanged functions unless they are named.
 
 MFA is **off** for this first deploy (`REQUIRE_MFA=false` in `.env.my-super-manager-app`,
 `VITE_REQUIRE_MFA=false` in `web/.env`, `mfaOk()` returns true in `firestore.rules`). Turn it back on in
