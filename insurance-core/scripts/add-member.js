@@ -8,13 +8,13 @@
  */
 const admin = require('firebase-admin');
 const { getFirestore } = require('firebase-admin/firestore');
-const { createAuthService } = require('../src/auth/service');
+const { createAuthModule } = require('../src/modules/auth');
 
 (async () => {
   const [tenantId, uid, role, email] = process.argv.slice(2);
   if (!tenantId || !uid || !role) throw new Error('Usage: node scripts/add-member.js <tenant-id> <uid> <role> [email]');
   const app = admin.initializeApp();
   const db = getFirestore(app, process.env.FIRESTORE_DATABASE_ID || '(default)');
-  await createAuthService({ db }).bootstrapMember({ tenantId, uid, email, role });
+  await createAuthModule({ db }).bootstrapMember({ tenantId, uid, email, role });
   console.log(`${uid} is now ${role} at "${tenantId}".`);
 })().catch((e) => { console.error(e.message); process.exit(1); });

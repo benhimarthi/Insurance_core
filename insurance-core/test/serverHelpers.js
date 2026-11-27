@@ -11,7 +11,7 @@ const { createMockDocumentProcessor } = require('../src/adapters/documentProcess
 const { createDemoPaymentAdapter } = require('../src/adapters/demoPayment');
 const { createFirestorePolicyAdmin } = require('../src/adapters/firestorePolicyAdmin');
 const { createVerifier } = require('../src/verification/verification');
-const { createAuthService } = require('../src/auth/service');
+const { createAuthModule } = require('../src/modules/auth');
 
 const TENANT = 'demo-insurer';
 const PAY_SECRET = 'pay-secret';
@@ -42,7 +42,7 @@ function makeEnv({ tenants, withVerifier = true } = {}) {
   const repo = createRepository(db, { now });
   const revoked = [];
   const authAdmin = { revokeRefreshTokens: async (uid) => { revoked.push(uid); } };
-  const authService = createAuthService({ db, authAdmin, now, requireMfa: true, logger });
+  const authService = createAuthModule({ db, authAdmin, now, requireMfa: true, logger });
 
   const defaultTenants = {
     [TENANT]: { tenant: { id: TENANT, name: 'Assurance Démo', demo: true, status: 'active', webchatKey: null }, config: baseConfig },

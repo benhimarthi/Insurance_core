@@ -4,6 +4,8 @@ Generic AI underwriting assistant for insurers: rules engine, multilingual chat 
 verification, payment and policy PDF, plus the Firebase Cloud Functions layer that runs it on
 WhatsApp and web chat. Demo-ready, with adapters to swap in an insurer's own systems.
 
+The code is being organised as feature modules following clean architecture: see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Layout
 | Path | Role |
 |---|---|
@@ -12,11 +14,19 @@ WhatsApp and web chat. Demo-ready, with adapters to swap in an insurer's own sys
 | `src/documents`, `src/adapters/documentProcessor.js` | ID and registration checks, cross-checks |
 | `src/policy`, `src/payment` | Quote to payment to policy PDF; webhook signature verification |
 | `src/verification` | QR verification links: unguessable codes, public read-only view |
-| `src/auth` | Roles, permissions, invitations, member management, audit of access changes |
+| `src/modules/auth` | Auth module (clean architecture): roles, permissions, invitations, member management, audit of access changes |
+| `src/shared` | Shared kernel: errors, identifier formats, hashing helpers |
 | `src/server` | Framework-agnostic handlers, Firestore repository, outbox, tenants |
 | `src/channels`, `src/adapters` | WaSender, Gemini, storage, demo payment, policy numbering |
 | `index.js` | Cloud Functions entry (thin HTTP adapter) |
 | `dashboard/` | Dashboard login and tenant switcher (own `package.json` and tests, see its README) |
+
+## Deploy the auth module alone
+The `members` function needs no secrets and builds only the auth module, so access management can go live first:
+1. Firebase project on the Blaze plan with Firestore and Authentication (email/password) enabled.
+2. `.env.<project>`: `REQUIRE_MFA=false` until Identity Platform MFA is enabled (and relax `mfaOk()` in `firestore.rules`).
+3. `firebase deploy --only functions:members,firestore`
+4. Step 7 of the full deploy below (platform admin, first insurer admin).
 
 ## Run the tests
 `npm install && npm test` (no Firebase project or emulator needed: a strict Firestore double is used).
@@ -53,7 +63,7 @@ Each policy PDF carries a QR code (top right) and the printed link `{verify URL}
 - It is a public endpoint: put Cloud Armor or a rate limit in front of it for production, and keep `maxInstances` low.
 
 ## Authentication and roles
-Firebase Auth proves who someone is; `src/auth` decides what they may do. Customers never sign in
+Firebase Auth proves who someone is; the auth module (`src/modules/auth`) decides what they may do. Customers never sign in
 (they are identified by WhatsApp number or web session); accounts are for staff only.
 
 | Role | Scope | Can |
@@ -79,5 +89,5 @@ Firebase Auth proves who someone is; `src/auth` decides what they may do. Custom
   records the reviewer's role.
 - **Callables:** `members` (`myTenants`, `list`, `invite`, `accept`, `revokeInvitation`, `changeRole`,
   `setStatus`, `remove`) and `underwriterDecision`.
-- **Read access for the dashboard** comes from `firestore.rules`, which mirrors the role lists in `src/auth/roles.js`.
+- **Read access for the dashboard** comes from `firestore.rules`, which mirrors the role lists in `src/modules/auth/domain/roles.js`.
   The rules are not covered by the automated tests (they need the Firestore emulator): test them there before production.

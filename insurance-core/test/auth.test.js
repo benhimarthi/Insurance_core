@@ -3,8 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { makeEnv, referredCase, TENANT } = require('./serverHelpers');
-const { PERMISSIONS, ROLES, TENANT_ROLES, can } = require('../src/auth/roles');
-const { INVITE_TTL_MS } = require('../src/auth/service');
+const { PERMISSIONS, ROLES, TENANT_ROLES, can, INVITE_TTL_MS, createAuthModule } = require('../src/modules/auth');
 const config = require('../config/tenants/demo-insurer/motor.json');
 
 const code = (fn) => fn.then(() => assert.fail('should have thrown'), (e) => e.code);
@@ -76,8 +75,7 @@ test('authorize: a disabled member loses access immediately; MFA can be switched
   env.seedMember(TENANT, 'uw-1', 'underwriter', 'disabled');
   assert.strictEqual(await msg(ask()), 'permission-denied:FORBIDDEN');
 
-  const { createAuthService } = require('../src/auth/service');
-  const relaxed = createAuthService({ db: env.db, requireMfa: false });
+  const relaxed = createAuthModule({ db: env.db, requireMfa: false });
   env.seedMember(TENANT, 'uw-1', 'underwriter');
   await relaxed.authorize({ auth: env.user('uw-1', { firebase: {} }), tenantId: TENANT, permission: 'case:read' });
 });

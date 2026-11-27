@@ -1,4 +1,4 @@
-/** UI texts (fr / en) and role labels. The role KEYS come from the server (src/auth/roles.js). */
+/** UI texts (fr / en) and role labels. The role KEYS come from the server (src/modules/auth/domain/roles.js). */
 
 export const ROLE_LABELS = {
   fr: { tenant_admin: 'Administrateur', underwriter: 'Souscripteur', underwriting_manager: 'Responsable souscription', auditor: 'Auditeur', platform_admin: 'Équipe plateforme' },

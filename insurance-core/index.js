@@ -26,6 +26,7 @@ const { getFirestore } = require('firebase-admin/firestore');
 const { getStorage } = require('firebase-admin/storage');
 
 const { buildProductionApp } = require('./src/server/production');
+const { createAuthModule } = require('./src/modules/auth');
 const { AppError } = require('./src/server/util');
 
 setGlobalOptions({ region: 'europe-west1', maxInstances: 10 }); // closest region to Morocco with Gen2 support
@@ -46,16 +47,27 @@ const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
 const VERIFY_SECRET = defineSecret('VERIFY_SECRET');
 const SECRETS = [WASENDER_API_KEY, WASENDER_WEBHOOK_SECRET, PAYMENT_WEBHOOK_SECRET, PHONE_PEPPER, GEMINI_API_KEY, VERIFY_SECRET];
 
+const firebaseApp = () => (admin.apps.length ? admin.app() : admin.initializeApp());
+// Named database pattern: always pass the database id explicitly.
+const firestore = () => getFirestore(firebaseApp(), FIRESTORE_DATABASE_ID.value());
+
+// Auth module: needs only Firestore and Firebase Auth (no secrets), so `members` deploys on its own.
+let authModule;
+function getAuthModule() {
+  if (!authModule) {
+    authModule = createAuthModule({ db: firestore(), authAdmin: admin.auth(firebaseApp()), requireMfa: REQUIRE_MFA.value() !== 'false' });
+  }
+  return authModule;
+}
+
 let app;
 function getApp() {
   if (!app) {
-    const firebaseApp = admin.apps.length ? admin.app() : admin.initializeApp();
-    // Named database pattern: always pass the database id explicitly.
-    const db = getFirestore(firebaseApp, FIRESTORE_DATABASE_ID.value());
     app = buildProductionApp({
-      db,
-      authAdmin: admin.auth(firebaseApp),
-      bucket: getStorage(firebaseApp).bucket(),
+      db: firestore(),
+      authAdmin: admin.auth(firebaseApp()),
+      authModule: getAuthModule(),
+      bucket: getStorage(firebaseApp()).bucket(),
       env: {
         geminiApiKey: GEMINI_API_KEY.value(),
         geminiModel: GEMINI_MODEL.value(),
@@ -121,8 +133,8 @@ exports.verify = onRequest({ secrets: SECRETS, timeoutSeconds: 30, memory: '256M
 // Callables for the dashboard (Firebase SDK: httpsCallable(functions, name)(data)).
 const authOf = (request) => request.auth && { uid: request.auth.uid, token: request.auth.token };
 
-function callable(handler) {
-  return onCall({ secrets: SECRETS, enforceAppCheck: false /* set true once App Check is configured */ }, async (request) => {
+function callable(handler, { secrets = SECRETS } = {}) {
+  return onCall({ secrets, enforceAppCheck: false /* set true once App Check is configured */ }, async (request) => {
     try {
       return await handler(request);
     } catch (err) {
@@ -140,7 +152,9 @@ exports.underwriterDecision = callable((request) => getApp().handleUnderwriterDe
 
 // { action: 'myTenants' | 'allTenants' (platform only) | 'list' | 'invite' | 'accept' | 'revokeInvitation' | 'changeRole' | 'setStatus' | 'remove', tenantId, ... }
 // Platform staff must add `reason` on every action that targets an insurer.
-exports.members = callable((request) => getApp().handleMembers({ auth: authOf(request), data: request.data }));
+// Auth module only: no secrets, no other module loaded. Deploy alone with
+//   firebase deploy --only functions:members,firestore
+exports.members = callable((request) => getAuthModule().handle({ auth: authOf(request), data: request.data }), { secrets: [] });
 
 exports.retryOutbox = onSchedule({ schedule: 'every 2 minutes', secrets: SECRETS, timeoutSeconds: 120 }, async () => {
   await getApp().retryOutbox();

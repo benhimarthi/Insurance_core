@@ -12,14 +12,14 @@ const { createDemoPaymentAdapter } = require('../adapters/demoPayment');
 const { createFirestorePolicyAdmin } = require('../adapters/firestorePolicyAdmin');
 const { createFirebaseStorage } = require('../adapters/storage');
 const { createVerifier } = require('../verification/verification');
-const { createAuthService } = require('../auth/service');
+const { createAuthModule } = require('../modules/auth');
 
 /**
  * Wires the real adapters. `env` holds secrets and params (see index.js).
  * Payment: demo checkout when env.demoPaymentsEnabled, otherwise a real provider adapter must be
  * passed in as `paymentAdapter` (CMI, Stripe...), because no real provider is bundled.
  */
-function buildProductionApp({ db, bucket, env, paymentAdapter, authAdmin }) {
+function buildProductionApp({ db, bucket, env, paymentAdapter, authAdmin, authModule }) {
   const gemini = createGemini({ apiKey: env.geminiApiKey, model: env.geminiModel });
   const demoPay = env.demoPaymentsEnabled ? createDemoPaymentAdapter({ db, baseUrl: env.demoPayBaseUrl }) : null;
 
@@ -39,7 +39,7 @@ function buildProductionApp({ db, bucket, env, paymentAdapter, authAdmin }) {
     paymentSecret: () => env.paymentWebhookSecret, // single secret for the demo; per-tenant secrets for real providers
     pepper: env.phonePepper,
     demoPay,
-    authService: createAuthService({ db, authAdmin, requireMfa: env.requireMfa }),
+    authService: authModule || createAuthModule({ db, authAdmin, requireMfa: env.requireMfa }),
     // QR verification is optional: without both values the PDF simply has no QR code
     verifier: env.verifyBaseUrl && env.verifySecret ? createVerifier({ secret: env.verifySecret, baseUrl: env.verifyBaseUrl }) : null,
   });
