@@ -1,8 +1,8 @@
 # Deploys to Firebase project my-super-manager-app:
 #   - the Cloud Functions of the modules enabled in insurance-core/.env.my-super-manager-app
-#     (ENABLED_MODULES; today auth -> `members` and tenants -> `tenants`, neither needs secrets)
+#     (ENABLED_MODULES: auth -> members, tenants -> tenants, conversation -> webchat, conversationCleanup)
 #   - Firestore rules and indexes
-#   - Hosting: the staff web app (insurance-core/web)
+#   - Hosting: the staff web app and the customer chat page (insurance-core/web)
 # Runs every test first and deploys nothing if one fails.
 #
 # Needs one repository secret, FIREBASE_SERVICE_ACCOUNT: the JSON key of a Google Cloud service
@@ -11,6 +11,11 @@ name: Deploy
 
 on:
   workflow_dispatch:
+    inputs:
+      redeploy_functions:
+        description: 'Functions to redeploy even if unchanged, comma separated (e.g. conversationCleanup). Repairs a deploy that stopped halfway, like a missing schedule.'
+        type: string
+        default: ''
   push:
     branches: [main]
     paths:
@@ -63,10 +68,16 @@ jobs:
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
       - name: Deploy
-        # --only functions: every function index.js defines, i.e. the enabled modules' ones.
+        env:
+          REDEPLOY: ${{ inputs.redeploy_functions }}
+        # --only functions: every function index.js defines (the enabled modules'); unchanged ones are skipped.
+        # Functions named in REDEPLOY are targeted explicitly (functions:<name>), which the CLI never skips.
         # --force: non-interactive (sets the Artifact Registry cleanup policy for function images).
-        run: >-
-          npx --yes firebase-tools@14 deploy
-          --project my-super-manager-app
-          --only functions,firestore,hosting
-          --non-interactive --force
+        run: |
+          targets="functions"
+          if [ -n "$REDEPLOY" ]; then
+            if ! printf '%s' "$REDEPLOY" | grep -Eq '^[A-Za-z0-9_]+(,[A-Za-z0-9_]+)*$'; then echo "Invalid function list: $REDEPLOY"; exit 1; fi
+            targets=$(printf '%s' "$REDEPLOY" | sed 's/^/functions:/; s/,/,functions:/g')
+          fi
+          echo "Deploying: $targets,firestore,hosting"
+          npx --yes firebase-tools@14 deploy --project my-super-manager-app --only "$targets,firestore,hosting" --non-interactive --force
