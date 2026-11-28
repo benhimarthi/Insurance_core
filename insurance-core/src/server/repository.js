@@ -125,6 +125,25 @@ function createRepository(db, { now = () => new Date() } = {}) {
       await db.doc(`outbox/${id}`).set(stripUndefined(patch), { merge: true });
     },
 
+    /** Cases of one insurer, last updated first (optionally one status: index status + updatedAt). */
+    async listCases(tenantId, { status, limit = 100 } = {}) {
+      let q = db.collection(`tenants/${tenantId}/cases`);
+      if (status) q = q.where('status', '==', status);
+      const snap = await q.orderBy('updatedAt', 'desc').limit(limit).get();
+      return snap.docs.map((d) => d.data());
+    },
+
+    /** A case's audit trail, oldest first. */
+    async listCaseEvents(tenantId, caseId, limit = 200) {
+      const snap = await eventsCol(tenantId, caseId).orderBy('at', 'asc').limit(limit).get();
+      return snap.docs.map((d) => d.data());
+    },
+
+    /** Audit only (e.g. a document was opened): the case itself is not touched. */
+    async appendEvent(tenantId, caseId, event) {
+      await eventsCol(tenantId, caseId).doc().set(stripUndefined(event));
+    },
+
     /**
      * Data retention: deletes cases last updated before `updatedBy` that never got past `stages`
      * (abandoned conversations), with their audit events and the customer record pointing to them.

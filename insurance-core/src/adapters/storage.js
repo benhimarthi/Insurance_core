@@ -25,6 +25,7 @@ function createMemoryStorage({ now = () => new Date() } = {}) {
       return f.bytes;
     },
     async getSignedUrl(filePath) { return `memory://${filePath}`; },
+    async exists(filePath) { return files.has(filePath); },
     get: (filePath) => files.get(filePath) || null,
     count: () => files.size,
   };
@@ -60,6 +61,10 @@ function createFirebaseStorage(bucket) {
     async getSignedUrl(filePath, ttlMs = 15 * 60 * 1000) {
       const [url] = await bucket.file(filePath).getSignedUrl({ version: 'v4', action: 'read', expires: Date.now() + ttlMs });
       return url;
+    },
+    async exists(filePath) {
+      const [found] = await bucket.file(filePath).exists();
+      return found;
     },
     /** Data retention: files under `prefix` created before `before`. Pages through the listing. */
     async deleteOlderThan(prefix, before) {

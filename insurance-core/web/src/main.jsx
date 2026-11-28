@@ -8,6 +8,7 @@ import { DashboardProvider, ReasonDialog } from 'insurance-dashboard-auth/react'
 import { firebaseConfig } from './firebaseConfig.js';
 import { AppShell } from './AppShell.jsx';
 import { createTenantsApi } from './tenantsApi.js';
+import { createCasesApi } from './casesApi.js';
 import { QrCode } from './QrCode.jsx';
 import './styles.css';
 
@@ -28,6 +29,7 @@ const api = createMembersApi({
   lang,
 });
 const tenantsApi = createTenantsApi({ call, askReason: (action) => asker.ask(action), getContext });
+const casesApi = createCasesApi({ call });
 store = createTenantStore({ api, storage: window.localStorage });
 const keeper = createInviteKeeper({ win: window });
 keeper.capture(); // reads an invitation link (#t=...&i=...&k=...) and removes the token from the address bar
@@ -35,7 +37,7 @@ keeper.capture(); // reads an invitation link (#t=...&i=...&k=...) and removes t
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <DashboardProvider client={client} store={store} api={api} keeper={keeper}>
-      <AppShell lang={lang} renderQr={(url) => <QrCode value={url} />} tenantsApi={tenantsApi} />
+      <AppShell lang={lang} renderQr={(url) => <QrCode value={url} />} tenantsApi={tenantsApi} casesApi={casesApi} />
       <ReasonDialog asker={asker} lang={lang} />
     </DashboardProvider>
   </StrictMode>,

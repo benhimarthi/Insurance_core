@@ -5,25 +5,27 @@ import { texts } from './texts.js';
 import { MembersPage } from './MembersPage.jsx';
 import { SettingsPage } from './SettingsPage.jsx';
 import { PlatformPage } from './PlatformPage.jsx';
+import { CasesPage } from './CasesPage.jsx';
 
 /**
  * Login gate, header (insurer switcher, pages, sign-out) and the pages. The platform page sits
  * outside the insurer gate: the platform team must be able to create the very first insurer.
  */
-export function AppShell({ lang, renderQr, tenantsApi }) {
+export function AppShell({ lang, renderQr, tenantsApi, casesApi }) {
   return (
     <RequireAuth lang={lang} renderQr={renderQr}>
-      <Pages lang={lang} tenantsApi={tenantsApi} />
+      <Pages lang={lang} tenantsApi={tenantsApi} casesApi={casesApi} />
     </RequireAuth>
   );
 }
 
-function Pages({ lang, tenantsApi }) {
+function Pages({ lang, tenantsApi, casesApi }) {
   const x = texts(lang).nav;
   const auth = useAuth();
   const { can, select } = useTenants();
-  const [page, setPage] = useState('members');
+  const [page, setPage] = useState(null); // null: the first tab the person may use
   const tabs = [
+    { id: 'cases', label: x.cases, show: can('case:read') },
     { id: 'members', label: x.members, show: can('members:read') },
     { id: 'settings', label: x.settings, show: can('config:read') },
     { id: 'platform', label: x.platform, show: !!auth.platformRole },
@@ -47,7 +49,9 @@ function Pages({ lang, tenantsApi }) {
         ? <PlatformPage api={tenantsApi} lang={lang} onCreated={(id) => { try { select(id); } catch { /* not in the list yet */ } setPage('settings'); }} />
         : (
           <TenantGate lang={lang}>
-            {current === 'settings' ? <SettingsPage api={tenantsApi} lang={lang} /> : <MembersPage lang={lang} />}
+            {current === 'settings' ? <SettingsPage api={tenantsApi} lang={lang} />
+              : current === 'cases' ? <CasesPage api={casesApi} lang={lang} />
+                : <MembersPage lang={lang} />}
           </TenantGate>
         )}
     </>

@@ -62,7 +62,7 @@ test('decisions use their own callable', async () => {
   const { calls, call } = recorder({ ok: true, status: 'approved' });
   const api = createMembersApi({ call });
   assert.deepEqual(await api.decide('alpha-insurer', { caseId: 'c1', decision: 'adjust', adjustedPremium: 4200, note: 'n' }), { ok: true, status: 'approved' });
-  assert.deepEqual(calls[0], ['underwriterDecision', { tenantId: 'alpha-insurer', caseId: 'c1', decision: 'adjust', adjustedPremium: 4200, note: 'n' }]);
+  assert.deepEqual(calls[0], ['underwriting', { action: 'decide', tenantId: 'alpha-insurer', caseId: 'c1', decision: 'adjust', adjustedPremium: 4200, note: 'n' }]);
 });
 
 test('server errors become ApiErrors with a reason, a message and a next step', async () => {

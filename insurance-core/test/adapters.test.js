@@ -174,7 +174,7 @@ try { require.resolve('firebase-functions/v2/https'); require.resolve('firebase-
 
 test('index.js loads and exports the expected functions', { skip: !hasFirebase }, () => {
   const exported = Object.keys(require('../index.js')).sort();
-  assert.deepStrictEqual(exported, ['conversationCleanup', 'demoPay', 'members', 'paymentWebhook', 'retryOutbox', 'tenants', 'underwriterDecision', 'verify', 'webchat', 'whatsappWebhook']);
+  assert.deepStrictEqual(exported, ['conversationCleanup', 'demoPay', 'members', 'paymentWebhook', 'retryOutbox', 'tenants', 'underwriting', 'verify', 'webchat', 'whatsappWebhook']);
 });
 
 test('index.js defines only the enabled modules (ENABLED_MODULES), so missing secrets of others do not block a deploy', { skip: !hasFirebase }, () => {
@@ -188,10 +188,11 @@ test('index.js defines only the enabled modules (ENABLED_MODULES), so missing se
     }
   };
   assert.deepStrictEqual(load('auth'), ['members']);
-  assert.deepStrictEqual(load('app'), ['demoPay', 'paymentWebhook', 'retryOutbox', 'underwriterDecision', 'verify', 'whatsappWebhook']);
+  assert.deepStrictEqual(load('app'), ['demoPay', 'paymentWebhook', 'retryOutbox', 'verify', 'whatsappWebhook']);
+  assert.deepStrictEqual(load('underwriting'), ['underwriting']);
   assert.deepStrictEqual(load('auth,tenants,conversation'), ['conversationCleanup', 'members', 'tenants', 'webchat']);
   assert.deepStrictEqual(load('auth,tenants'), ['members', 'tenants']);
-  assert.strictEqual(load('auth, tenants, conversation, app').length, 10);
+  assert.strictEqual(load('auth, tenants, conversation, underwriting, app').length, 10);
 });
 
 test('enabled modules: from the environment, else from .env.<project> (as during the CLI analysis), else all', () => {

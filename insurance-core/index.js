@@ -34,6 +34,8 @@ const { createAuthModule } = require('./src/modules/auth');
 const { createTenantsModule, createTenantLoader } = require('./src/modules/tenants');
 const { createConversationModule, createConversationCleanup, createFirestoreRateLimiter, createLlmExtractor, createLlmAssistant } = require('./src/modules/conversation');
 const { legacyConversationPorts } = require('./src/server/conversationPorts');
+const { createUnderwritingModule } = require('./src/modules/underwriting');
+const { notifyHumanDecision } = require('./src/policy/lifecycle');
 const { createRepository } = require('./src/server/repository');
 const { createGemini } = require('./src/adapters/gemini');
 const { createLlmDocumentProcessor, createMockDocumentProcessor } = require('./src/adapters/documentProcessor');
@@ -47,8 +49,8 @@ const REQUIRE_MFA = defineString('REQUIRE_MFA', { default: 'true' }); // needs I
 
 /**
  * Which modules this deployment defines functions for, from ENABLED_MODULES (comma separated, in
- * .env.<project>): `auth`, `tenants`, `conversation` (web chat), `app` (everything not yet split into
- * modules: WhatsApp, payment, policy, verification), or `all` (the default).
+ * .env.<project>): `auth`, `tenants`, `conversation` (web chat), `underwriting` (review queue, decisions),
+ * `app` (everything not yet split into modules: WhatsApp, payment, policy, verification), or `all` (the default).
  * See src/server/enabledModules.js for why it also reads the .env file itself.
  * The Firebase CLI checks every secret index.js declares, even with `--only functions:<name>`, so a
  * module whose secrets do not exist yet must not be defined at all.
@@ -75,7 +77,7 @@ const SECRETS = moduleEnabled('app') ? secretsOf('app') : [];
 const GEMINI_MODEL = moduleEnabled('conversation') || moduleEnabled('app') ? defineString('GEMINI_MODEL', { default: 'gemini-2.5-flash' }) : null;
 // Cloud Storage bucket for customer documents and policies. Named explicitly: the "default bucket" the
 // runtime guesses can be the legacy <project>.appspot.com while new projects use <project>.firebasestorage.app.
-const STORAGE_BUCKET = moduleEnabled('conversation') || moduleEnabled('app') ? defineString('STORAGE_BUCKET', { default: '' }) : null;
+const STORAGE_BUCKET = ['conversation', 'underwriting', 'app'].some(moduleEnabled) ? defineString('STORAGE_BUCKET', { default: '' }) : null;
 const bucket = () => getStorage(firebaseApp()).bucket(STORAGE_BUCKET.value() || undefined);
 // App Check on the web chat: off | monitor | enforce (see src/modules/conversation/interface/webChatHttp.js)
 const WEBCHAT_APP_CHECK = moduleEnabled('conversation') ? defineString('WEBCHAT_APP_CHECK', { default: 'off' }) : null;
@@ -144,6 +146,24 @@ function getConversationModule() {
     });
   }
   return conversationModule;
+}
+
+// Underwriting module: the review queue, cases, document links, decisions. No secrets.
+// Replies to WhatsApp customers wait in the outbox for the app module's retry job; web chat customers poll.
+let underwritingModule;
+function getUnderwritingModule() {
+  if (!underwritingModule) {
+    const auth = getAuthModule();
+    const db = firestore();
+    underwritingModule = createUnderwritingModule({
+      authorize: ({ caller, ...rest }) => auth.authorize({ auth: caller, ...rest }),
+      store: createRepository(db),
+      tenants: { load: createTenantLoader({ db, localDir: null }) },
+      notifier: { announce: notifyHumanDecision },
+      files: createFirebaseStorage(bucket()),
+    });
+  }
+  return underwritingModule;
 }
 
 /**
@@ -250,6 +270,12 @@ if (moduleEnabled('conversation')) {
   });
 }
 
+// ---------- underwriting module: needs no secrets ----------
+// { action: 'list' | 'get' | 'documentLink' | 'decide' | 'message', tenantId, ... }
+if (moduleEnabled('underwriting')) {
+  exports.underwriting = callable((request) => getUnderwritingModule().handle({ auth: authOf(request), data: request.data }), { secrets: [] });
+}
+
 // ---------- the rest of the app (not yet split into modules): needs every secret ----------
 if (moduleEnabled('app')) {
   exports.whatsappWebhook = onRequest({ secrets: SECRETS, timeoutSeconds: 120, memory: '512MiB' },
@@ -270,11 +296,6 @@ if (moduleEnabled('app')) {
     if (req.method !== 'GET') return { status: 405, body: { error: 'method_not_allowed' } };
     const [tenantId, policyNumber, code] = segments(req);
     return getApp().handleVerify({ tenantId, policyNumber, code, format: req.query.format === 'json' ? 'json' : 'html', lang: req.query.lang === 'en' ? 'en' : 'fr' });
-  }));
-
-  // { tenantId, caseId, decision: 'approve' | 'adjust' | 'reject', adjustedPremium?, note? }
-  exports.underwriterDecision = callable((request) => getApp().handleUnderwriterDecision({
-    tenantId: request.data && request.data.tenantId, auth: authOf(request), data: request.data,
   }));
 
   exports.retryOutbox = onSchedule({ schedule: 'every 2 minutes', secrets: SECRETS, timeoutSeconds: 120 }, async () => {

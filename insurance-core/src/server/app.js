@@ -1,7 +1,7 @@
 'use strict';
 
 const { createConversationModule } = require('../modules/conversation');
-const { applyHumanDecision } = require('../shared/cases');
+const { createUnderwritingModule } = require('../modules/underwriting');
 const { legacyConversationPorts } = require('./conversationPorts');
 const { notifyHumanDecision, handlePaymentEvent } = require('../policy/lifecycle');
 const { parseWebhook } = require('../payment/webhook');
@@ -125,47 +125,24 @@ function buildApp({
 
   // ---------- Underwriter decision (called by the dashboard) ----------
 
-  /**
-   * auth: { uid, token } from Firebase Auth (token carries email_verified, email, MFA and the
-   * platformRole claim). What the person may do comes from authService.authorize(): their role at
-   * THIS insurer, read live from Firestore.
-   */
-  async function handleUnderwriterDecision({ tenantId, auth, data }) {
-    const ctx = await authService.authorize({ auth, tenantId, permission: 'case:decide' });
-    const loaded = await loadTenant(tenantId);
-    if (!loaded) throw new AppError('not-found', 'Unknown tenant.');
+  // ---------- Underwriting: the underwriting module (decisions, the review queue) ----------
 
-    const { caseId, decision, adjustedPremium, note } = data || {};
-    if (typeof caseId !== 'string' || !ID_RE.test(caseId)) throw new AppError('invalid-argument', 'Invalid caseId.');
-    if (!['approve', 'adjust', 'reject'].includes(decision)) throw new AppError('invalid-argument', 'decision must be approve, adjust or reject.');
-    if (decision === 'adjust' && !(Number.isFinite(adjustedPremium) && adjustedPremium > 0)) throw new AppError('invalid-argument', 'adjust needs a positive adjustedPremium.');
-    if (note !== undefined && (typeof note !== 'string' || note.length > 500)) throw new AppError('invalid-argument', 'note must be at most 500 characters.');
+  const underwriting = createUnderwritingModule({
+    authorize: ({ caller, ...rest }) => authService.authorize({ auth: caller, ...rest }),
+    store: repo,
+    tenants: { load: loadTenant },
+    notifier: { announce: notifyHumanDecision },
+    delivery: { send: deliver },
+    files: storage,
+    now,
+    logger,
+  });
 
-    const result = await repo.transact({
-      tenantId, caseId,
-      compute: async ({ caseDoc }) => {
-        if (!caseDoc) throw new AppError('not-found', 'Case not found.');
-
-        // Underwriters decide up to the insurer's premium limit; larger amounts need a manager.
-        const amount = decision === 'adjust' ? adjustedPremium
-          : decision === 'approve' ? (caseDoc.engineResult && caseDoc.engineResult.premium ? caseDoc.engineResult.premium.total : 0) : 0;
-        const limit = loaded.config.authorization && loaded.config.authorization.underwriterPremiumLimit;
-        if (limit && amount > limit && !ctx.permissions.includes('case:decide_high')) throw new AppError('permission-denied', 'LIMIT_EXCEEDED');
-
-        let decided;
-        try {
-          decided = applyHumanDecision(caseDoc, { reviewerId: ctx.uid, decision, adjustedPremium, note });
-        } catch (err) {
-          throw new AppError('failed-precondition', err.message); // already decided, or not pending review
-        }
-        decided.event.payload.reviewerRole = ctx.role; // who decided, and in which capacity
-        const notice = notifyHumanDecision({ caseDoc: decided.case, config: loaded.config });
-        return { caseDoc: notice.caseDoc, events: [decided.event], outbox: notice.replies.map(textEntry) };
-      },
-    });
-    await deliver(result.outbox);
-    return { ok: true, status: result.caseDoc.status };
-  }
+  /** data: { caseId, decision: 'approve' | 'adjust' | 'reject', adjustedPremium?, note? } */
+  const handleUnderwriterDecision = ({ tenantId, auth, data }) => {
+    const d = data || {};
+    return underwriting.decide({ auth, tenantId, caseId: d.caseId, decision: d.decision, adjustedPremium: d.adjustedPremium, note: d.note });
+  };
 
   // ---------- Demo checkout page ----------
 
@@ -228,7 +205,7 @@ function buildApp({
     return deliverOutbox({ repo, channel, storage, entries: due, now, logger });
   }
 
-  return { handleWhatsAppWebhook, handleWebChat, handlePaymentWebhook, handleUnderwriterDecision, handleMembers: (args) => authService.handle(args), handleDemoPay, handleVerify, retryOutbox };
+  return { handleWhatsAppWebhook, handleWebChat, handlePaymentWebhook, handleUnderwriterDecision, handleUnderwriting: underwriting.handle, handleMembers: (args) => authService.handle(args), handleDemoPay, handleVerify, retryOutbox };
 }
 
 module.exports = { buildApp };
