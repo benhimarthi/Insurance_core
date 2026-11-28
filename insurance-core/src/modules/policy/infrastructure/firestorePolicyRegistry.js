@@ -1,6 +1,7 @@
 'use strict';
 
-const { sha256, stripUndefined } = require('../server/util');
+const { sha256 } = require('../../../shared/crypto');
+const { stripUndefined } = require('../../../shared/firestore');
 
 /**
  * Policy records and numbering in Firestore, for the demo deployment. A real insurer's core
@@ -10,7 +11,7 @@ const { sha256, stripUndefined } = require('../server/util');
  *   counters/{t}-{prefix}-{year}          { value }
  *   policyIdempotency/{hash}              { policy }
  */
-function createFirestorePolicyAdmin(db) {
+function createFirestorePolicyRegistry(db) {
   return {
     async createPolicy(draft) {
       const year = draft.issuedAt.slice(0, 4);
@@ -38,4 +39,4 @@ function createFirestorePolicyAdmin(db) {
   };
 }
 
-module.exports = { createFirestorePolicyAdmin };
+module.exports = { createFirestorePolicyRegistry };

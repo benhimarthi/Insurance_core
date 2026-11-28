@@ -23,8 +23,9 @@
  * @property {(extracted, config, now) => {ok, type, fields?, confidence, issue?}} accept
  * @property {(input, documents, config, now) => object[]} crossCheck                    flags for a human
  *
- * @typedef {object} Payments           optional: without it, an accepted quote is "confirmed" and the insurer follows up
- * @property {(args: {caseDoc, config, now}) => Promise<{caseDoc, replies, events}>} requestPayment
+ * @typedef {object} Payments           optional (the payment module): without it, or when it returns null (no
+ *                                     provider for this insurer), an accepted quote is "confirmed" and the insurer follows up
+ * @property {(args: {caseDoc, config, now}) => Promise<{caseDoc, replies, events}|null>} requestPayment
  *
  * @typedef {object} CaseStore          cases, customers and the outbox (see src/server/repository.js)
  * @property {(tenantId, customerId) => Promise<object|null>} getCustomer

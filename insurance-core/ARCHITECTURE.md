@@ -54,8 +54,8 @@ code in; each future module will provide its port from its own `index.js`, and o
 | `conversation` | **done** (web chat) | the chat flow, questions, NLU, messages, AI extractor, receiving messages from any channel, web chat. Function `webchat` (secrets: `GEMINI_API_KEY`, `PHONE_PEPPER`). WhatsApp still in `src/server/app.js`, on top of the module |
 | `underwriting` | **done** | rules engine, review queue, case view, document links, decisions within the premium limit, messages to the customer. Function `underwriting`, no secrets |
 | `documents` | planned | ID and registration checks (`src/documents`, document processor adapters) |
-| `payment` | planned | payment links, webhook verification, demo checkout (`src/payment`, payment adapters) |
-| `policy` | planned | issuance, numbering, PDF (`src/policy`, policy admin adapters) |
+| `payment` | **done** | payment links per insurer (demo checkout for demo insurers), signed provider webhooks, exact amount, idempotent; asks the policy module to issue. Functions `paymentWebhook`, `demoPay` (secret: `PAYMENT_WEBHOOK_SECRET`) |
+| `policy` | **done** | who may be issued, policy draft from verified data, numbering (registry), PDF, storage. No function of its own: used by payment |
 | `verification` | planned | public QR verification (`src/verification`) |
 
 Until a feature is migrated, its code stays where it is and `src/server/app.js` keeps wiring it.
@@ -137,6 +137,30 @@ src/modules/underwriting/
   interface/
     underwritingController.js       the `underwriting` callable
 ```
+
+## The payment and policy modules
+
+```
+src/modules/payment/
+  index.js                          createPaymentModule({ store, tenants, gateways, demoGateway?, webhookSecret, policies, messages, delivery? })
+  domain/payment.js                 payable statuses, exact amount, link reuse and expiry
+  application/useCases/
+    requestPayment.js               the conversation's Payments port: create or reuse the link (null: no provider)
+    applyPaymentEvent.js            failed / wrong amount / succeeded -> policies.issue, confirmation + PDF
+    webhook.js                      signature first, one transaction deduplicated on the event id, then delivery
+    demoCheckout.js                 the demo page: GET shows the amount, POST signs the event and takes the same path
+  infrastructure/                   webhookSignature (HMAC), demoGateway (Firestore), mockGateway, gatewaySelection
+  interface/                        http.js (webhook and page answers), demoPayPage.js
+
+src/modules/policy/
+  index.js                          createPolicyModule({ registry, files, verifier? }) -> { issue, getPolicy }
+  domain/policy.js                  isApprovedForIssuance, buildPolicyDraft, dates, premium parts
+  application/useCases/issuePolicy.js   number (idempotent on the case), render the PDF, store it
+  infrastructure/                   pdfRenderer (pdf-lib, QR code), firestorePolicyRegistry, memoryPolicyRegistry
+```
+
+Customer texts (PAY) and the decision notice (`announceDecision`) belong to the conversation module; the payment
+module receives them as ports. Policies are stored under `tenants/{t}/policies/`, outside the `uploads/` retention.
 
 ## The tenants module
 

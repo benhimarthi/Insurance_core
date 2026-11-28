@@ -2,14 +2,13 @@
 
 const { evaluateCase } = require('../modules/underwriting');
 const documents = require('../documents/documents');
-const { requestPayment } = require('../policy/lifecycle');
 
 /**
- * Plugs the code not yet split into modules (rules engine, documents, payment) into the ports the
- * conversation module asks for. When underwriting, documents and payment become modules, their
- * index.js provides these and this file goes away.
+ * Plugs the rules engine (underwriting module) and the document checks (not yet a module) into the
+ * ports the conversation module asks for; `payments` is the payment module's requestPayment, if any.
+ * When documents becomes a module, its index.js provides that port and this file goes away.
  */
-function legacyConversationPorts({ documentProcessor, paymentAdapter = null }) {
+function legacyConversationPorts({ documentProcessor, payments = null }) {
   return {
     underwriting: { evaluate: evaluateCase },
     documents: {
@@ -20,7 +19,7 @@ function legacyConversationPorts({ documentProcessor, paymentAdapter = null }) {
       crossCheck: documents.crossCheck,
       process: (args) => documentProcessor.process(args),
     },
-    payments: paymentAdapter ? { requestPayment: (args) => requestPayment({ ...args, paymentAdapter }) } : null,
+    payments,
   };
 }
 

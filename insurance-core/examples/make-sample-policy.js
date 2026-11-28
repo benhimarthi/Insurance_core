@@ -2,25 +2,28 @@
 // Generates a sample policy PDF through the full flow: node examples/make-sample-policy.js
 const path = require('path');
 const config = require('../config/tenants/demo-insurer/motor.json');
-const { makeFlow, createMockExtractor } = require('../src/modules/conversation');
+const { makeFlow, createMockExtractor, PAY } = require('../src/modules/conversation');
+const { createPaymentModule, createMockGateway, parseWebhook } = require('../src/modules/payment');
+const { createPolicyModule, createMemoryPolicyRegistry, isApprovedForIssuance } = require('../src/modules/policy');
 const { legacyConversationPorts } = require('../src/server/conversationPorts');
-const { handlePaymentEvent } = require('../src/policy/lifecycle');
-const { parseWebhook } = require('../src/payment/webhook');
 const { createMockDocumentProcessor } = require('../src/adapters/documentProcessor');
-const { createMockPaymentAdapter } = require('../src/adapters/payment');
-const { createMockPolicyAdmin } = require('../src/adapters/policyAdmin');
 const { createFileStorage } = require('../src/adapters/storage');
 const { newCase } = require('../src/shared/cases');
 const { createVerifier } = require('../src/verification/verification');
 
 (async () => {
   const now = new Date();
-  const pay = createMockPaymentAdapter();
+  const pay = createMockGateway();
   const storage = createFileStorage(path.join(__dirname, 'output'));
-  const policyAdmin = createMockPolicyAdmin();
+  const verifier = createVerifier({ secret: 'sample-only-secret', baseUrl: 'https://verify.demo-insurer.example/v' });
+  const policy = createPolicyModule({ registry: createMemoryPolicyRegistry(), files: storage, verifier });
+  const payment = createPaymentModule({
+    gateways: { forTenant: async () => pay }, webhookSecret: () => pay.secret,
+    policies: { issue: policy.issue, isApprovedForIssuance }, messages: PAY,
+  });
   const extractor = createMockExtractor();
   const documentProcessor = createMockDocumentProcessor();
-  const handleMessage = makeFlow({ extractor, ...legacyConversationPorts({ documentProcessor, paymentAdapter: pay }) });
+  const handleMessage = makeFlow({ extractor, ...legacyConversationPorts({ documentProcessor, payments: payment }) });
 
   let caseDoc = newCase({ id: 'demo-case-1', tenantId: 'demo-insurer', channel: 'web', customerId: 'demo-customer' });
   const turns = [
@@ -37,8 +40,7 @@ const { createVerifier } = require('../src/verification/verification');
 
   const { rawBody, signature } = pay.simulate(caseDoc.payment.paymentId); // "the customer paid"
   const event = parseWebhook({ secret: pay.secret, rawBody, signature });
-  const verifier = createVerifier({ secret: 'sample-only-secret', baseUrl: 'https://verify.demo-insurer.example/v' });
-  const issued = await handlePaymentEvent({ caseDoc, event, config, policyAdmin, storage, verifier, now });
+  const issued = await payment.applyPaymentEvent({ caseDoc, event, config, now });
   console.log('BOT:', issued.replies[0]);
   console.log('PDF:', path.join('examples/output', issued.attachments[0].path));
 })();

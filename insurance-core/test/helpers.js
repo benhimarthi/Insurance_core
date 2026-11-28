@@ -1,7 +1,10 @@
 'use strict';
 
 const config = require('../config/tenants/demo-insurer/motor.json');
-const { makeFlow, createMockExtractor } = require('../src/modules/conversation');
+const { makeFlow, createMockExtractor, PAY } = require('../src/modules/conversation');
+const { createPaymentModule } = require('../src/modules/payment');
+const { createPolicyModule, createMemoryPolicyRegistry, isApprovedForIssuance } = require('../src/modules/policy');
+const { createMemoryStorage } = require('../src/adapters/storage');
 const { legacyConversationPorts } = require('../src/server/conversationPorts');
 const { createMockDocumentProcessor } = require('../src/adapters/documentProcessor');
 const { newCase } = require('../src/shared/cases');
@@ -26,7 +29,8 @@ async function converse(items, {
   start,
 } = {}) {
   let caseDoc = start || newCase({ id: 'case-1', tenantId: 'demo-insurer', channel: 'whatsapp', customerId: 'cust-1' });
-  const flow = makeFlow({ extractor, ...legacyConversationPorts({ documentProcessor, paymentAdapter }) });
+  const payments = paymentAdapter ? paymentKit({ gateway: paymentAdapter }) : null;
+  const flow = makeFlow({ extractor, ...legacyConversationPorts({ documentProcessor, payments }) });
   const replies = [];
   const events = [];
   for (const item of items) {
@@ -39,4 +43,18 @@ async function converse(items, {
   return { caseDoc, replies, events };
 }
 
-module.exports = { config, NOW, FRENCH_ANSWERS, doc, converse };
+/**
+ * The payment and policy modules wired as in production, with one gateway for every insurer:
+ * requestPayment (the conversation's Payments port) and applyPaymentEvent (a verified provider event).
+ */
+function paymentKit({ gateway, registry = createMemoryPolicyRegistry(), storage = createMemoryStorage(), verifier = null }) {
+  const policy = createPolicyModule({ registry, files: storage, verifier });
+  return createPaymentModule({
+    gateways: { forTenant: async () => gateway },
+    webhookSecret: () => gateway.secret,
+    policies: { issue: policy.issue, isApprovedForIssuance },
+    messages: PAY,
+  });
+}
+
+module.exports = { config, NOW, FRENCH_ANSWERS, doc, converse, paymentKit };

@@ -9,7 +9,7 @@ const { createGemini } = require('../src/adapters/gemini');
 const { createLlmExtractor } = require('../src/modules/conversation');
 const { createLlmDocumentProcessor } = require('../src/adapters/documentProcessor');
 const { createTenantLoader } = require('../src/modules/tenants');
-const { createFirestorePolicyAdmin } = require('../src/adapters/firestorePolicyAdmin');
+const { createFirestorePolicyRegistry } = require('../src/modules/policy');
 const { createFirebaseStorage } = require('../src/adapters/storage');
 const { stripUndefined, customerKey, safeEqual } = require('../src/server/util');
 const config = require('../config/tenants/demo-insurer/motor.json');
@@ -128,7 +128,7 @@ const draft = (caseId, year = '2026') => ({
 
 test('Firestore policy admin: sequential numbers, idempotent per case, yearly counters, undefined-safe', async () => {
   const db = new FakeFirestore();
-  const admin = createFirestorePolicyAdmin(db);
+  const admin = createFirestorePolicyRegistry(db);
   const a = await admin.createPolicy(draft('case-a'));
   const b = await admin.createPolicy(draft('case-b'));
   const aAgain = await admin.createPolicy(draft('case-a'));
@@ -188,11 +188,12 @@ test('index.js defines only the enabled modules (ENABLED_MODULES), so missing se
     }
   };
   assert.deepStrictEqual(load('auth'), ['members']);
-  assert.deepStrictEqual(load('app'), ['demoPay', 'paymentWebhook', 'retryOutbox', 'verify', 'whatsappWebhook']);
+  assert.deepStrictEqual(load('app'), ['retryOutbox', 'verify', 'whatsappWebhook']);
+  assert.deepStrictEqual(load('payment'), ['demoPay', 'paymentWebhook']);
   assert.deepStrictEqual(load('underwriting'), ['underwriting']);
   assert.deepStrictEqual(load('auth,tenants,conversation'), ['conversationCleanup', 'members', 'tenants', 'webchat']);
   assert.deepStrictEqual(load('auth,tenants'), ['members', 'tenants']);
-  assert.strictEqual(load('auth, tenants, conversation, underwriting, app').length, 10);
+  assert.strictEqual(load('auth, tenants, conversation, underwriting, payment, app').length, 10);
 });
 
 test('enabled modules: from the environment, else from .env.<project> (as during the CLI analysis), else all', () => {

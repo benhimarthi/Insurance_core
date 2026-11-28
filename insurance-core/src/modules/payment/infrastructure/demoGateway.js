@@ -1,8 +1,8 @@
 'use strict';
 
 const crypto = require('crypto');
-const { sha256 } = require('../server/util');
-const { signPayload } = require('../payment/webhook');
+const { sha256 } = require('../../../shared/crypto');
+const { signPayload } = require('./webhookSignature');
 
 /**
  * Firestore-backed DEMO payment gateway. It moves no money. The payment link opens a fake
@@ -11,7 +11,7 @@ const { signPayload } = require('../payment/webhook');
  * Serverless-safe (state lives in Firestore) unlike the in-memory mock. Enable only for demo tenants.
  *   demoPayments/{paymentId}   demoPaymentKeys/{hash}
  */
-function createDemoPaymentAdapter({ db, baseUrl, now = () => new Date() }) {
+function createDemoGateway({ db, baseUrl, now = () => new Date() }) {
   return {
     async createPaymentLink({ tenantId, caseId, amount, currency, description, expiresAt, idempotencyKey }) {
       const keyRef = db.doc(`demoPaymentKeys/${sha256(idempotencyKey)}`);
@@ -51,4 +51,4 @@ function createDemoPaymentAdapter({ db, baseUrl, now = () => new Date() }) {
   };
 }
 
-module.exports = { createDemoPaymentAdapter };
+module.exports = { createDemoGateway };

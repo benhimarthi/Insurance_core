@@ -1,6 +1,6 @@
 'use strict';
 
-const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const { escapeHtml } = require('../../../shared/format');
 
 const SECURITY_HEADERS = {
   'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'",
@@ -10,7 +10,7 @@ const SECURITY_HEADERS = {
 
 const TEXT = {
   form: { title: 'Paiement sécurisé (démo)', button: 'Payer', note: 'Démonstration : aucun paiement réel n’est effectué.' },
-  paid: { title: 'Paiement confirmé', body: 'Merci ! Vous allez recevoir votre contrat sur WhatsApp.' },
+  paid: { title: 'Paiement confirmé', body: 'Merci ! Votre contrat vous est envoyé dans la conversation.' },
   expired: { title: 'Lien expiré', body: 'Ce lien de paiement a expiré. Revenez dans la conversation pour en obtenir un nouveau.' },
   error: { title: 'Une erreur est survenue', body: 'Le paiement n’a pas pu être traité. Réessayez dans un instant.' },
   missing: { title: 'Lien introuvable', body: 'Ce lien de paiement n’existe pas.' },
@@ -40,4 +40,4 @@ function renderPayPage({ state, payment, brand }) {
   return layout(t.title, `<h1>${t.title}</h1><p>${t.body}</p>`, brand);
 }
 
-module.exports = { renderPayPage, escapeHtml, SECURITY_HEADERS };
+module.exports = { renderPayPage, SECURITY_HEADERS };

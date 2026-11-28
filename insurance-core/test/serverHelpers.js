@@ -8,8 +8,8 @@ const { createMemoryChannel } = require('../src/channels/whatsapp');
 const { createMemoryStorage } = require('../src/adapters/storage');
 const { createMockExtractor } = require('../src/modules/conversation');
 const { createMockDocumentProcessor } = require('../src/adapters/documentProcessor');
-const { createDemoPaymentAdapter } = require('../src/adapters/demoPayment');
-const { createFirestorePolicyAdmin } = require('../src/adapters/firestorePolicyAdmin');
+const { createDemoGateway } = require('../src/modules/payment');
+const { createFirestorePolicyRegistry } = require('../src/modules/policy');
 const { createVerifier } = require('../src/verification/verification');
 const { createAuthModule } = require('../src/modules/auth');
 
@@ -34,8 +34,8 @@ function makeEnv({ tenants, withVerifier = true } = {}) {
 
   const channel = createMemoryChannel({ secret: WH_SECRET });
   const storage = createMemoryStorage();
-  const payments = createDemoPaymentAdapter({ db, baseUrl: 'https://demo.example/pay', now });
-  const realPolicyAdmin = createFirestorePolicyAdmin(db);
+  const payments = createDemoGateway({ db, baseUrl: 'https://demo.example/pay', now });
+  const realPolicyAdmin = createFirestorePolicyRegistry(db);
   const lookups = [];
   const policyAdmin = { createPolicy: (d) => realPolicyAdmin.createPolicy(d), getPolicy: (t, n) => { lookups.push([t, n]); return realPolicyAdmin.getPolicy(t, n); } };
   const verifier = withVerifier ? createVerifier({ secret: 'verify-secret', baseUrl: 'https://verify.example/v' }) : null;
