@@ -6,6 +6,8 @@ WhatsApp and web chat. Demo-ready, with adapters to swap in an insurer's own sys
 
 The code is being organised as feature modules following clean architecture: see [ARCHITECTURE.md](ARCHITECTURE.md).
 
+For building the user interfaces, see the [frontend blueprint](docs/frontend-blueprint.pdf): every screen, its states, the calls it makes, the roles and the error codes, with diagrams and screenshots.
+
 ## Layout
 | Path | Role |
 |---|---|
