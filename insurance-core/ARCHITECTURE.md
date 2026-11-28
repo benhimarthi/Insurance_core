@@ -52,7 +52,7 @@ code in; each future module will provide its port from its own `index.js`, and o
 | `auth` | **done** | roles, permissions, authorization, invitations, member management, access audit trail. Deployable alone (`members` function, no secrets) |
 | `tenants` | **done** | insurers (create, rename, demo flag, suspend, web chat key), rules JSON validated, versioned and restorable, tenant loader. Function `tenants`, no secrets |
 | `conversation` | **done** (web chat) | the chat flow, questions, NLU, messages, AI extractor, receiving messages from any channel, web chat. Function `webchat` (secrets: `GEMINI_API_KEY`, `PHONE_PEPPER`). WhatsApp still in `src/server/app.js`, on top of the module |
-| `underwriting` | planned | rules engine (`src/rules`), referrals and underwriter decisions |
+| `underwriting` | **done** | rules engine, review queue, case view, document links, decisions within the premium limit, messages to the customer. Function `underwriting`, no secrets |
 | `documents` | planned | ID and registration checks (`src/documents`, document processor adapters) |
 | `payment` | planned | payment links, webhook verification, demo checkout (`src/payment`, payment adapters) |
 | `policy` | planned | issuance, numbering, PDF (`src/policy`, policy admin adapters) |
@@ -120,6 +120,23 @@ src/modules/conversation/
 
 The customer page is `web/chat.html` (`/chat/{tenantId}` on Firebase Hosting). It calls `/api/webchat/{tenantId}`,
 which Hosting forwards to the `webchat` function (same origin, no CORS).
+
+## The underwriting module
+
+```
+src/modules/underwriting/
+  index.js                          createUnderwritingModule({ authorize, store, tenants, notifier, delivery?, files }), evaluateCase
+  domain/
+    engine.js                       the rules engine: eligibility, risk score, premium, referral (pure)
+    decision.js                     decision input, premium limit (case:decide_high above it), unfinished conversations
+    caseView.js                     what underwriters see: queue item, case detail, contact; never file paths
+  application/
+    ports.js                        Authorizer, CaseStore, TenantLoader, DecisionNotifier, Delivery, Files
+    useCases/cases.js               listCases (waiting / recent), getCase, documentLink (5-minute link, audited)
+    useCases/decide.js              decide, messageCustomer (one transaction with the audit event and the outbox)
+  interface/
+    underwritingController.js       the `underwriting` callable
+```
 
 ## The tenants module
 

@@ -25,7 +25,7 @@ const FR = {
   fields: {
     'driver.age': 'Âge du conducteur', 'driver.licenseYears': 'Années de permis', 'driver.claimsLast3Years': 'Sinistres (3 dernières années)',
     'driver.hasSuspension': 'Permis suspendu', 'vehicle.category': 'Catégorie du véhicule', 'vehicle.value': 'Valeur du véhicule',
-    'vehicle.ageYears': 'Âge du véhicule', 'vehicle.usage': 'Usage du véhicule', 'location.riskZone': 'Zone', coverage: 'Garantie',
+    'vehicle.ageYears': 'Âge du véhicule', 'vehicle.usage': 'Usage du véhicule', 'location.city': 'Ville', 'location.riskZone': 'Zone', coverage: 'Garantie',
   },
   ops: { eq: '=', ne: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤', in: 'est l’un de', nin: 'n’est aucun de' },
   words: { and: 'et', or: 'ou', not: 'non', yes: 'oui', no: 'non' },
@@ -62,7 +62,7 @@ const EN = {
   fields: {
     'driver.age': 'Driver age', 'driver.licenseYears': 'Years of license', 'driver.claimsLast3Years': 'Claims (last 3 years)',
     'driver.hasSuspension': 'License suspended', 'vehicle.category': 'Vehicle category', 'vehicle.value': 'Vehicle value',
-    'vehicle.ageYears': 'Vehicle age', 'vehicle.usage': 'Vehicle usage', 'location.riskZone': 'Zone', coverage: 'Coverage',
+    'vehicle.ageYears': 'Vehicle age', 'vehicle.usage': 'Vehicle usage', 'location.city': 'City', 'location.riskZone': 'Zone', coverage: 'Coverage',
   },
   ops: { eq: '=', ne: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤', in: 'is one of', nin: 'is none of' },
   words: { and: 'and', or: 'or', not: 'not', yes: 'yes', no: 'no' },

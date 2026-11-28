@@ -16,6 +16,7 @@ The code is being organised as feature modules following clean architecture: see
 | `src/verification` | QR verification links: unguessable codes, public read-only view |
 | `src/modules/auth` | Auth module (clean architecture): roles, permissions, invitations, member management, audit of access changes |
 | `src/modules/conversation` | Conversation module: chat flow, questions, AI extractor, receiving messages, web chat (`webchat` function) |
+| `src/modules/underwriting` | Underwriting module: rules engine, review queue, cases, decisions, messages to customers (`underwriting` function) |
 | `src/modules/tenants` | Tenants module: insurers (create, rename, suspend), their rules JSON (validated, versioned, restorable), the tenant loader |
 | `src/shared` | Shared kernel: errors, identifier formats, hashing helpers |
 | `src/server` | Framework-agnostic handlers, Firestore repository, outbox (not yet split into modules) |
@@ -127,6 +128,20 @@ One-time setup before deploying it (`ENABLED_MODULES` contains `conversation`):
   Content-Security-Policy, `X-Frame-Options: DENY` and a Permissions-Policy.
 - **Gemini and personal data**: use a **paid** Gemini API key (or Vertex AI) before real customers: on the free tier,
   Google may use the content (ID cards included) to improve its products. Check your CNDP (law 09-08) obligations.
+
+## Underwriting (review queue)
+In the web app, **Dossiers** lists the cases waiting for a person (referred by the rules, an advisor asked, a stuck
+conversation) and recent cases. A case shows the customer's validated answers, the rules' recommendation with score,
+reasons and premium breakdown, the documents with their checks, the contact and the audit trail.
+- **Read** (`case:read`): every insurer role except the platform team. Opening a document photo gives a 5-minute link
+  and writes `document_viewed` to the case's audit trail; photos are gone after the 90-day retention.
+- **Decide** (`case:decide`): approve the proposed premium, approve another premium (above the insurer's
+  `underwriterPremiumLimit`, only `underwriting_manager`), or reject. The customer is told in their chat. A
+  conversation that stopped before the rules ran can only be rejected, or answered with a message.
+- **Write to the customer** (`case:decide`): the message appears in their conversation (audit: length only).
+- Opening photos needs the functions' service account (`<project-number>-compute@developer.gserviceaccount.com`) to
+  hold **Service Account Token Creator** on itself (signed links).
+- `tenant_admin` sees cases but does not decide (separation of duties): decisions need an underwriter role.
 
 ## Run the tests
 `npm install && npm test` (no Firebase project or emulator needed: a strict Firestore double is used).

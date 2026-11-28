@@ -1,7 +1,7 @@
 // Texts of the web app's own pages (the login and switcher texts live in the dashboard package).
 export const TEXTS = {
   fr: {
-    nav: { members: 'Membres', settings: 'Assureur et règles', platform: 'Plateforme' },
+    nav: { cases: 'Dossiers', members: 'Membres', settings: 'Assureur et règles', platform: 'Plateforme' },
     common: { save: 'Enregistrer', cancel: 'Annuler', note: 'Motif du changement (enregistré dans l’historique)', notePh: 'Ex. : nouveau tarif au 1er janvier', loading: 'Chargement…', copy: 'Copier', close: 'Fermer' },
     settings: {
       title: 'Assureur', status: { active: 'actif', suspended: 'suspendu' }, demo: 'démo', id: 'Identifiant',
@@ -37,7 +37,7 @@ export const TEXTS = {
     },
   },
   en: {
-    nav: { members: 'Members', settings: 'Insurer and rules', platform: 'Platform' },
+    nav: { cases: 'Cases', members: 'Members', settings: 'Insurer and rules', platform: 'Platform' },
     common: { save: 'Save', cancel: 'Cancel', note: 'Reason for the change (kept in the history)', notePh: 'E.g. new tariff from January 1', loading: 'Loading…', copy: 'Copy', close: 'Close' },
     settings: {
       title: 'Insurer', status: { active: 'active', suspended: 'suspended' }, demo: 'demo', id: 'Identifier',

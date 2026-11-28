@@ -1,6 +1,6 @@
 'use strict';
 
-const { evaluateCase } = require('../rules/engine');
+const { evaluateCase } = require('../modules/underwriting');
 const documents = require('../documents/documents');
 const { requestPayment } = require('../policy/lifecycle');
 

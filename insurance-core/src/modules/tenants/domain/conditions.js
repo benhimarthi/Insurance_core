@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * The condition grammar of the rules engine (src/rules/engine.js), checked before a config is saved:
+ * The condition grammar of the rules engine (src/modules/underwriting/domain/engine.js), checked before a config is saved:
  *   { field: "driver.age", op: "lt", value: 25 }
  *   { all: [cond, ...] } | { any: [cond, ...] } | { not: cond }
  * Keep OPERATORS in sync with OPS in the engine.

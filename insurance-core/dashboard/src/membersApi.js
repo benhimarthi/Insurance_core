@@ -1,7 +1,7 @@
 import { ApiError, normalizeError } from './errors.js';
 
 /**
- * Typed wrappers around the `members` and `underwriterDecision` callables.
+ * Typed wrappers around the `members` callable, plus the decision of the `underwriting` callable.
  *
  *   call(name, data)  -> Promise<data>        (see createCallable in firebasePort.js)
  *   getContext()      -> { tenantId, access, platformOnly } the active insurer and how the user reaches it:
@@ -50,6 +50,6 @@ export function createMembersApi({ call, getContext = () => null, askReason = nu
     accept: ({ tenantId, invitationId, token }) => invoke('members', { action: 'accept', tenantId, invitationId, token }),
 
     decide: (tenantId, { caseId, decision, adjustedPremium, note }) =>
-      invoke('underwriterDecision', { tenantId, caseId, decision, adjustedPremium, note }),
+      invoke('underwriting', { action: 'decide', tenantId, caseId, decision, adjustedPremium, note }),
   };
 }

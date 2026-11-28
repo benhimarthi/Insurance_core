@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const config = require('../config/tenants/demo-insurer/motor.json');
-const { evaluateCase } = require('../src/rules/engine');
+const { evaluateCase } = require('../src/modules/underwriting');
 const { newCase, caseStatusFromEngine, applyHumanDecision, CASE_STATUS } = require('../src/shared/cases');
 
 const cleanCase = () => ({
