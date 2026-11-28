@@ -8,31 +8,30 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const { PDFDocument } = require('pdf-lib');
 
-const { config, NOW, FRENCH_ANSWERS, doc, converse } = require('./helpers');
-const { createMockPaymentAdapter } = require('../src/adapters/payment');
-const { createMockPolicyAdmin } = require('../src/adapters/policyAdmin');
+const { config, NOW, FRENCH_ANSWERS, doc, converse, paymentKit } = require('./helpers');
+const { createMockGateway: createMockPaymentAdapter, parseWebhook } = require('../src/modules/payment');
+const { createMemoryPolicyRegistry: createMockPolicyAdmin, buildPolicyDraft, addMonths, isoDate, generatePolicyPdf } = require('../src/modules/policy');
+const { announceDecision: notifyHumanDecision } = require('../src/modules/conversation');
 const { createMemoryStorage } = require('../src/adapters/storage');
-const { parseWebhook } = require('../src/payment/webhook');
-const { notifyHumanDecision, requestPayment, handlePaymentEvent } = require('../src/policy/lifecycle');
-const { buildPolicyDraft, addMonths, isoDate } = require('../src/policy/policy');
-const { generatePolicyPdf } = require('../src/policy/pdf');
 const { applyHumanDecision, CASE_STATUS } = require('../src/shared/cases');
 
 const HAS_PDFTOTEXT = spawnSync('pdftotext', ['-v']).error === undefined;
 
 function setup() {
-  return {
+  const env = {
     pay: createMockPaymentAdapter({ clock: () => NOW }),
     policyAdmin: createMockPolicyAdmin(),
     storage: createMemoryStorage(),
   };
+  env.kit = paymentKit({ gateway: env.pay, registry: env.policyAdmin, storage: env.storage }); // payment + policy modules
+  return env;
 }
 
 /** Delivers a signed payment webhook the way the Cloud Function would: verify, then handle. */
 async function deliver(env, caseDoc, simulateOpts) {
   const { rawBody, signature } = env.pay.simulate(caseDoc.payment.paymentId, simulateOpts);
   const event = parseWebhook({ secret: env.pay.secret, rawBody, signature });
-  return handlePaymentEvent({ caseDoc, event, config, policyAdmin: env.policyAdmin, storage: env.storage, now: NOW });
+  return env.kit.applyPaymentEvent({ caseDoc, event, config, now: NOW });
 }
 
 function pdfText(bytes) {
@@ -120,7 +119,7 @@ test('an event for another case is rejected', async () => {
   const env = setup();
   const { caseDoc } = await autoQuoted(env);
   const event = { id: 'evt_x', type: 'payment.succeeded', paymentId: caseDoc.payment.paymentId, caseId: 'case-9', amount: 3696, currency: 'MAD' };
-  await assert.rejects(handlePaymentEvent({ caseDoc, event, config, policyAdmin: env.policyAdmin, storage: env.storage, now: NOW }), /does not match/);
+  await assert.rejects(env.kit.applyPaymentEvent({ caseDoc, event, config, now: NOW }), /does not match/);
 });
 
 test('failed payment: customer can retry with the same link, then pay', async () => {
@@ -155,18 +154,18 @@ test('referred case: underwriter adjusts the premium, customer accepts and pays 
 test('a referred case without human approval can never be paid or issued', async () => {
   const env = setup();
   const referred = await converse([...FRENCH_ANSWERS, doc('demo_id_ok', 'demo_registration_other_owner')], { paymentAdapter: env.pay });
-  await assert.rejects(requestPayment({ caseDoc: referred.caseDoc, config, paymentAdapter: env.pay, now: NOW }), /Cannot request payment/);
+  await assert.rejects(env.kit.requestPayment({ caseDoc: referred.caseDoc, config, now: NOW }), /Cannot request payment/);
 
   // even if someone forces the status and stage, the approval rule still blocks it
   const forced = { ...referred.caseDoc, status: CASE_STATUS.QUOTED, flow: { stage: 'confirmed' } };
-  await assert.rejects(requestPayment({ caseDoc: forced, config, paymentAdapter: env.pay, now: NOW }), /only possible for automatically accepted or human-approved/);
+  await assert.rejects(env.kit.requestPayment({ caseDoc: forced, config, now: NOW }), /only possible for automatically accepted or human-approved/);
 });
 
 test('payment is refused until the customer has accepted the premium', async () => {
   const env = setup();
   const quoted = await converse([...FRENCH_ANSWERS, doc('demo_id_ok', 'demo_registration_ok')], { paymentAdapter: env.pay });
   assert.strictEqual(quoted.caseDoc.status, CASE_STATUS.QUOTED);
-  await assert.rejects(requestPayment({ caseDoc: quoted.caseDoc, config, paymentAdapter: env.pay, now: NOW }), /not accepted/);
+  await assert.rejects(env.kit.requestPayment({ caseDoc: quoted.caseDoc, config, now: NOW }), /not accepted/);
 });
 
 test('rejected by the underwriter: neutral message, case closed, no payment', async () => {
@@ -177,18 +176,18 @@ test('rejected by the underwriter: neutral message, case closed, no payment', as
   assert.match(notice.replies[0], /ne pouvons malheureusement pas donner suite/);
   assert.doesNotMatch(notice.replies[0], /propriétaire|Owner/);
   assert.strictEqual(notice.caseDoc.flow.stage, 'closed');
-  await assert.rejects(requestPayment({ caseDoc: notice.caseDoc, config, paymentAdapter: env.pay, now: NOW }), /Cannot request payment/);
+  await assert.rejects(env.kit.requestPayment({ caseDoc: notice.caseDoc, config, now: NOW }), /Cannot request payment/);
 });
 
 test('payment link is reused while valid and renewed after expiry', async () => {
   const env = setup();
   const { caseDoc } = await autoQuoted(env);
-  const again = await requestPayment({ caseDoc, config, paymentAdapter: env.pay, now: NOW });
+  const again = await env.kit.requestPayment({ caseDoc, config, now: NOW });
   assert.strictEqual(again.caseDoc.payment.paymentId, caseDoc.payment.paymentId);
   assert.deepStrictEqual(again.events, []);
 
   const later = new Date(NOW.getTime() + 3 * 24 * 3600 * 1000);
-  const renewed = await requestPayment({ caseDoc, config, paymentAdapter: env.pay, now: later });
+  const renewed = await env.kit.requestPayment({ caseDoc, config, now: later });
   assert.notStrictEqual(renewed.caseDoc.payment.paymentId, caseDoc.payment.paymentId);
   assert.strictEqual(renewed.caseDoc.payment.attempt, 2);
 });

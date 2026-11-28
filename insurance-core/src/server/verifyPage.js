@@ -1,6 +1,12 @@
 'use strict';
 
-const { escapeHtml, SECURITY_HEADERS } = require('./demoPayPage');
+const { escapeHtml } = require('../shared/format');
+// Same base as the demo checkout page: nothing loads but inline styles, no framing, no caching.
+const SECURITY_HEADERS = {
+  'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'",
+  'x-frame-options': 'DENY',
+  'cache-control': 'no-store',
+};
 
 const T = {
   fr: {

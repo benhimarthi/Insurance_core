@@ -35,7 +35,9 @@ const { createTenantsModule, createTenantLoader } = require('./src/modules/tenan
 const { createConversationModule, createConversationCleanup, createFirestoreRateLimiter, createLlmExtractor, createLlmAssistant } = require('./src/modules/conversation');
 const { legacyConversationPorts } = require('./src/server/conversationPorts');
 const { createUnderwritingModule } = require('./src/modules/underwriting');
-const { notifyHumanDecision } = require('./src/policy/lifecycle');
+const { createPaymentModule, createDemoGateway, demoCheckoutForDemoInsurers } = require('./src/modules/payment');
+const { createPolicyModule, createFirestorePolicyRegistry, isApprovedForIssuance } = require('./src/modules/policy');
+const { announceDecision, PAY } = require('./src/modules/conversation');
 const { createRepository } = require('./src/server/repository');
 const { createGemini } = require('./src/adapters/gemini');
 const { createLlmDocumentProcessor, createMockDocumentProcessor } = require('./src/adapters/documentProcessor');
@@ -50,7 +52,8 @@ const REQUIRE_MFA = defineString('REQUIRE_MFA', { default: 'true' }); // needs I
 /**
  * Which modules this deployment defines functions for, from ENABLED_MODULES (comma separated, in
  * .env.<project>): `auth`, `tenants`, `conversation` (web chat), `underwriting` (review queue, decisions),
- * `app` (everything not yet split into modules: WhatsApp, payment, policy, verification), or `all` (the default).
+ * `payment` (provider webhook, demo checkout; issues policies through the policy module),
+ * `app` (everything not yet split into modules: WhatsApp, verification), or `all` (the default).
  * See src/server/enabledModules.js for why it also reads the .env file itself.
  * The Firebase CLI checks every secret index.js declares, even with `--only functions:<name>`, so a
  * module whose secrets do not exist yet must not be defined at all.
@@ -62,6 +65,7 @@ const moduleEnabled = (name) => ENABLED_MODULES.includes('all') || ENABLED_MODUL
 // declared secret before a deploy, and refuses it if one does not exist in Secret Manager.
 const SECRETS_OF = {
   conversation: ['GEMINI_API_KEY', 'PHONE_PEPPER'],
+  payment: ['PAYMENT_WEBHOOK_SECRET'],
   app: ['WASENDER_API_KEY', 'WASENDER_WEBHOOK_SECRET', 'PAYMENT_WEBHOOK_SECRET', 'PHONE_PEPPER', 'GEMINI_API_KEY', 'VERIFY_SECRET'],
 };
 const SECRET = {};
@@ -81,10 +85,14 @@ const STORAGE_BUCKET = ['conversation', 'underwriting', 'app'].some(moduleEnable
 const bucket = () => getStorage(firebaseApp()).bucket(STORAGE_BUCKET.value() || undefined);
 // App Check on the web chat: off | monitor | enforce (see src/modules/conversation/interface/webChatHttp.js)
 const WEBCHAT_APP_CHECK = moduleEnabled('conversation') ? defineString('WEBCHAT_APP_CHECK', { default: 'off' }) : null;
+// The demo checkout (demo insurers only): on, and where its pages are served (Hosting /pay, same site).
+const PAYMENTS_PARAMS = ['conversation', 'payment', 'app'].some(moduleEnabled);
+const DEMO_PAYMENTS = PAYMENTS_PARAMS ? defineString('DEMO_PAYMENTS', { default: 'false' }) : null;
+const DEMO_PAY_BASE_URL = PAYMENTS_PARAMS ? defineString('DEMO_PAY_BASE_URL', { default: '' }) : null;
 const PARAM = moduleEnabled('app') ? {
   GEMINI_MODEL,
-  DEMO_PAYMENTS: defineString('DEMO_PAYMENTS', { default: 'false' }),
-  DEMO_PAY_BASE_URL: defineString('DEMO_PAY_BASE_URL', { default: '' }),
+  DEMO_PAYMENTS,
+  DEMO_PAY_BASE_URL,
   USE_LOCAL_TENANTS: defineString('USE_LOCAL_TENANTS', { default: 'false' }),
   VERIFY_BASE_URL: defineString('VERIFY_BASE_URL', { default: '' }),
 } : null;
@@ -120,6 +128,29 @@ function getTenantsModule() {
   return tenantsModule;
 }
 
+// Payment and policy modules. The webhook secret is read only when a webhook or the demo checkout
+// runs (those functions declare it); the web chat only creates links, which needs no secret.
+let paymentModule;
+function getPaymentModule() {
+  if (!paymentModule) {
+    const db = firestore();
+    const tenants = { load: createTenantLoader({ db, localDir: null }) };
+    const demoGateway = DEMO_PAYMENTS.value() === 'true' ? createDemoGateway({ db, baseUrl: DEMO_PAY_BASE_URL.value() }) : null;
+    const policy = createPolicyModule({ registry: createFirestorePolicyRegistry(db), files: createFirebaseStorage(bucket()) });
+    paymentModule = createPaymentModule({
+      store: createRepository(db),
+      tenants,
+      gateways: demoCheckoutForDemoInsurers({ tenants, demoGateway }),
+      demoGateway,
+      webhookSecret: () => SECRET.PAYMENT_WEBHOOK_SECRET.value(),
+      policies: { issue: policy.issue, isApprovedForIssuance },
+      messages: PAY,
+      // no delivery: web chat customers poll; WhatsApp replies wait for the app module's retry job
+    });
+  }
+  return paymentModule;
+}
+
 // Conversation module (web chat): Gemini reads the answers and the documents. Only its two secrets.
 let conversationModule;
 function getConversationModule() {
@@ -133,7 +164,8 @@ function getConversationModule() {
       assistant: createLlmAssistant({ callModel: gemini.callText }), // answers questions, redirects off-topic messages
       ...legacyConversationPorts({
         documentProcessor: { process: (args) => (args.attachment.demoFixture ? demoDocuments : llmDocuments).process(args) },
-      }), // no payment port yet: an accepted quote is "confirmed" and the insurer follows up
+        payments: moduleEnabled('payment') ? getPaymentModule() : null, // links; null for insurers without a provider
+      }),
       store: createRepository(db),
       uploads: createFirebaseStorage(bucket()),
       tenants: { load: createTenantLoader({ db, localDir: null }) },
@@ -159,7 +191,7 @@ function getUnderwritingModule() {
       authorize: ({ caller, ...rest }) => auth.authorize({ auth: caller, ...rest }),
       store: createRepository(db),
       tenants: { load: createTenantLoader({ db, localDir: null }) },
-      notifier: { announce: notifyHumanDecision },
+      notifier: { announce: announceDecision },
       files: createFirebaseStorage(bucket()),
     });
   }
@@ -276,20 +308,25 @@ if (moduleEnabled('underwriting')) {
   exports.underwriting = callable((request) => getUnderwritingModule().handle({ auth: authOf(request), data: request.data }), { secrets: [] });
 }
 
+// ---------- payment module: needs PAYMENT_WEBHOOK_SECRET ----------
+// POST {paymentWebhook URL}/{tenantId}: provider notifications (signed). GET/POST /pay/{tenantId}/{paymentId}
+// through Hosting: the demo checkout (demo insurers only).
+if (moduleEnabled('payment')) {
+  const afterPrefix = (req, prefix) => { const s = segments(req); return s[0] === prefix ? s.slice(1) : s; };
+  exports.paymentWebhook = onRequest({ secrets: secretsOf('payment'), timeoutSeconds: 120, memory: '512MiB' },
+    respond(postOnly((req) => getPaymentModule().handlePaymentWebhook({ tenantId: segments(req)[0], rawBody: rawBodyOf(req), headers: req.headers }))));
+  exports.demoPay = onRequest({ secrets: secretsOf('payment'), timeoutSeconds: 120, memory: '512MiB' },
+    respond((req) => {
+      if (!['GET', 'POST'].includes(req.method)) return { status: 405, body: { error: 'method_not_allowed' } };
+      const [tenantId, paymentId] = afterPrefix(req, 'pay');
+      return getPaymentModule().handleDemoPay({ tenantId, paymentId, method: req.method });
+    }));
+}
+
 // ---------- the rest of the app (not yet split into modules): needs every secret ----------
 if (moduleEnabled('app')) {
   exports.whatsappWebhook = onRequest({ secrets: SECRETS, timeoutSeconds: 120, memory: '512MiB' },
     respond(postOnly((req) => getApp().handleWhatsAppWebhook({ tenantId: segments(req)[0], headers: req.headers, body: req.body }))));
-
-  exports.paymentWebhook = onRequest({ secrets: SECRETS, timeoutSeconds: 120, memory: '512MiB' },
-    respond(postOnly((req) => getApp().handlePaymentWebhook({ tenantId: segments(req)[0], rawBody: rawBodyOf(req), headers: req.headers }))));
-
-  exports.demoPay = onRequest({ secrets: SECRETS, timeoutSeconds: 120, memory: '512MiB' },
-    respond((req) => {
-      if (!['GET', 'POST'].includes(req.method)) return { status: 405, body: { error: 'method_not_allowed' } };
-      const [tenantId, paymentId] = segments(req);
-      return getApp().handleDemoPay({ tenantId, paymentId, method: req.method });
-    }));
 
   // Public QR verification. GET /{tenantId}/{policyNumber}/{code}[?lang=en][&format=json]
   exports.verify = onRequest({ secrets: SECRETS, timeoutSeconds: 30, memory: '256MiB', maxInstances: 5 }, respond((req) => {

@@ -8,8 +8,8 @@ const { createWaSenderChannel } = require('../channels/whatsapp');
 const { createGemini } = require('../adapters/gemini');
 const { createLlmExtractor, createLlmAssistant } = require('../modules/conversation');
 const { createLlmDocumentProcessor } = require('../adapters/documentProcessor');
-const { createDemoPaymentAdapter } = require('../adapters/demoPayment');
-const { createFirestorePolicyAdmin } = require('../adapters/firestorePolicyAdmin');
+const { createDemoGateway } = require('../modules/payment');
+const { createFirestorePolicyRegistry } = require('../modules/policy');
 const { createFirebaseStorage } = require('../adapters/storage');
 const { createVerifier } = require('../verification/verification');
 const { createAuthModule } = require('../modules/auth');
@@ -21,7 +21,7 @@ const { createAuthModule } = require('../modules/auth');
  */
 function buildProductionApp({ db, bucket, env, paymentAdapter, authAdmin, authModule }) {
   const gemini = createGemini({ apiKey: env.geminiApiKey, model: env.geminiModel });
-  const demoPay = env.demoPaymentsEnabled ? createDemoPaymentAdapter({ db, baseUrl: env.demoPayBaseUrl }) : null;
+  const demoPay = env.demoPaymentsEnabled ? createDemoGateway({ db, baseUrl: env.demoPayBaseUrl }) : null;
 
   const payment = paymentAdapter || demoPay || {
     async createPaymentLink() { throw new Error('No payment provider configured for this deployment.'); },
@@ -35,7 +35,7 @@ function buildProductionApp({ db, bucket, env, paymentAdapter, authAdmin, authMo
     assistant: createLlmAssistant({ callModel: gemini.callText }),
     documentProcessor: createLlmDocumentProcessor({ callModel: gemini.callVision }),
     paymentAdapter: payment,
-    policyAdmin: createFirestorePolicyAdmin(db),
+    policyAdmin: createFirestorePolicyRegistry(db),
     storage: createFirebaseStorage(bucket),
     paymentSecret: () => env.paymentWebhookSecret, // single secret for the demo; per-tenant secrets for real providers
     pepper: env.phonePepper,

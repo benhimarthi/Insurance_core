@@ -21,7 +21,7 @@ const { MAX_DETOURS, sanitizeAnswer, insurerKnowledge } = require('../domain/det
  *
  * Stages: new -> asking -> documents (if config.documents) -> quoted | review | closed ;
  *         handoff at any point ; quoted -> payment (if payments) | confirmed | closed ;
- *         payment -> issued (see src/policy/lifecycle.js)
+ *         payment -> issued (payment and policy modules)
  */
 
 const MAX_RETRIES = 3;
@@ -264,11 +264,11 @@ function makeFlow(ports) {
         if (answer === true) {
           c.flow.stage = 'confirmed';
           events.push(newEvent({ type: EVENT.QUOTE_ACCEPTED, actor: customer, payload: { premium: finalPremium(c) } }));
-          if (!payments) { // payment not enabled for this deployment: the insurer follows up
+          const paid = payments ? await payments.requestPayment({ caseDoc: c, config, now }) : null;
+          if (!paid) { // no payment for this insurer (or deployment) yet: the insurer follows up
             replies.push(t(MESSAGES.confirmed, lang));
             return finish(c, replies, events);
           }
-          const paid = await payments.requestPayment({ caseDoc: c, config, now });
           return finish(paid.caseDoc, [...replies, ...paid.replies], [...events, ...paid.events]);
         }
         if (answer === false) {

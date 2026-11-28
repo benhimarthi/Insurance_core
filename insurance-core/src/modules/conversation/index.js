@@ -10,6 +10,7 @@
  */
 
 const { makeFlow, nextQuestion } = require('./application/flow');
+const { announceDecision } = require('./application/announceDecision');
 const { makeHandleInbound } = require('./application/useCases/handleInbound');
 const { makeWebChat } = require('./application/useCases/webChat');
 const { makeCleanup } = require('./application/useCases/cleanup');
@@ -52,6 +53,7 @@ function createConversationCleanup({ store, uploads, now = () => new Date(), log
 module.exports = {
   createConversationModule, createConversationCleanup, createFirestoreRateLimiter,
   makeFlow, nextQuestion,                            // the flow on its own (tests, examples)
+  announceDecision,                                  // the underwriting module's DecisionNotifier
   createMockExtractor, createLlmExtractor, createLlmAssistant,
   QUESTIONS, assertQuestionsCoverConfig,
   MESSAGES, DOC, PAY, t, quoteMessage,               // customer-facing texts (payment and policy use PAY)

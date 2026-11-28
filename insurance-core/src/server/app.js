@@ -1,16 +1,14 @@
 'use strict';
 
-const { createConversationModule } = require('../modules/conversation');
+const { createConversationModule, announceDecision, PAY } = require('../modules/conversation');
 const { createUnderwritingModule } = require('../modules/underwriting');
+const { createPolicyModule, isApprovedForIssuance, isoDate } = require('../modules/policy');
+const { createPaymentModule } = require('../modules/payment');
 const { legacyConversationPorts } = require('./conversationPorts');
-const { notifyHumanDecision, handlePaymentEvent } = require('../policy/lifecycle');
-const { parseWebhook } = require('../payment/webhook');
 const { deliverOutbox } = require('./outbox');
-const { renderPayPage, SECURITY_HEADERS } = require('./demoPayPage');
 const { renderVerifyPage, VERIFY_HEADERS } = require('./verifyPage');
 const { publicView, POLICY_NUMBER_RE, CODE_RE } = require('../verification/verification');
-const { isoDate } = require('../policy/policy');
-const { TENANT_ID_RE, ID_RE, AppError } = require('./util');
+const { TENANT_ID_RE } = require('./util');
 
 /**
  * Framework-agnostic handlers. index.js adapts Express requests to these plain inputs, and the
@@ -20,15 +18,16 @@ const { TENANT_ID_RE, ID_RE, AppError } = require('./util');
  *   - every inbound message and payment event is deduplicated (providers redeliver)
  *   - state is committed before anything is sent; replies go through a retried outbox
  *   - external calls never run inside a Firestore transaction (see repository.js)
- *   - a policy is only issued by the payment path, and only for approved cases (see lifecycle.js)
+ *   - a policy is only issued by the payment path, and only for approved cases (payment and policy modules)
+ *
+ * The modules do the work; this file wires them for the deployment that runs everything (WhatsApp
+ * included) and for the tests. paymentAdapter: the provider used for every insurer here.
  */
 
 function buildApp({
   repo, loadTenant, channel, extractor, assistant = null, documentProcessor, paymentAdapter, policyAdmin, storage,
   paymentSecret, pepper, authService, demoPay = null, verifier = null, now = () => new Date(), logger = console,
 }) {
-  const textEntry = (text) => ({ kind: 'text', text });
-
   async function deliver(outbox) {
     try {
       await deliverOutbox({ repo, channel, storage, entries: outbox, now, logger });
@@ -37,11 +36,26 @@ function buildApp({
     }
   }
 
+  // Policy and payment modules: links, provider notifications, issuance.
+  const policy = createPolicyModule({ registry: policyAdmin, files: storage, verifier });
+  const payment = createPaymentModule({
+    store: repo,
+    tenants: { load: loadTenant },
+    gateways: { forTenant: async () => paymentAdapter || null },
+    demoGateway: demoPay,
+    webhookSecret: paymentSecret,
+    policies: { issue: policy.issue, isApprovedForIssuance },
+    messages: PAY,
+    delivery: { send: deliver },
+    now,
+    logger,
+  });
+
   // Conversation module: receiving messages from any channel, and the web chat.
   const conversation = createConversationModule({
     extractor,
     assistant,
-    ...legacyConversationPorts({ documentProcessor, paymentAdapter }),
+    ...legacyConversationPorts({ documentProcessor, payments: payment }),
     store: repo,
     uploads: storage,
     tenants: { load: loadTenant },
@@ -76,52 +90,10 @@ function buildApp({
 
   const handleWebChat = conversation.handleWebChat;
 
-  // ---------- Payment webhook ----------
+  // ---------- Payment: the payment module (provider notifications, demo checkout) ----------
 
-  async function handlePaymentWebhook({ tenantId, rawBody, headers }) {
-    const loaded = await loadTenant(tenantId);
-    if (!loaded) return { status: 404, body: { error: 'unknown_tenant' } };
-
-    let event;
-    try {
-      event = parseWebhook({
-        secret: paymentSecret(tenantId),
-        rawBody: String(rawBody),
-        signature: (headers && (headers['x-signature'] || headers['x-webhook-signature'])) || '',
-      });
-    } catch (err) {
-      return { status: 401, body: { error: 'bad_signature' } };
-    }
-    if (!ID_RE.test(event.caseId)) return { status: 400, body: { error: 'bad_case_id' } };
-
-    try {
-      const result = await repo.transact({
-        tenantId, caseId: event.caseId,
-        dedupe: { kind: 'pay', id: event.id },
-        compute: async ({ caseDoc }) => {
-          if (!caseDoc) throw new AppError('not-found', 'Unknown case for this payment event.');
-          const out = await handlePaymentEvent({ caseDoc, event, config: loaded.config, policyAdmin, storage, verifier, now: now() });
-          return {
-            caseDoc: out.caseDoc,
-            events: out.events,
-            outbox: [
-              ...out.replies.map(textEntry),
-              ...out.attachments.map((a) => ({ kind: 'document', document: a })),
-            ],
-          };
-        },
-      });
-      if (!result.duplicate) await deliver(result.outbox);
-      return { status: 200, body: { ok: true, duplicate: !!result.duplicate } };
-    } catch (err) {
-      // Permanent problems get a 200 so the provider does not retry forever; they are logged for follow-up.
-      if (err instanceof AppError || /does not match/.test(err.message)) {
-        logger.error(`payment event ${event.id} ignored: ${err.message}`);
-        return { status: 200, body: { ok: false, ignored: err.message } };
-      }
-      throw err; // transient: 500, the provider retries and the dedupe marker keeps it safe
-    }
-  }
+  const handlePaymentWebhook = payment.handlePaymentWebhook;
+  const handleDemoPay = payment.handleDemoPay;
 
   // ---------- Underwriter decision (called by the dashboard) ----------
 
@@ -131,7 +103,7 @@ function buildApp({
     authorize: ({ caller, ...rest }) => authService.authorize({ auth: caller, ...rest }),
     store: repo,
     tenants: { load: loadTenant },
-    notifier: { announce: notifyHumanDecision },
+    notifier: { announce: announceDecision },
     delivery: { send: deliver },
     files: storage,
     now,
@@ -143,31 +115,6 @@ function buildApp({
     const d = data || {};
     return underwriting.decide({ auth, tenantId, caseId: d.caseId, decision: d.decision, adjustedPremium: d.adjustedPremium, note: d.note });
   };
-
-  // ---------- Demo checkout page ----------
-
-  async function handleDemoPay({ tenantId, paymentId, method }) {
-    const page = (status, state, payment, loaded) => ({
-      status, headers: SECURITY_HEADERS, html: renderPayPage({ state, payment, brand: loaded && loaded.tenant.name }),
-    });
-    if (!demoPay || !TENANT_ID_RE.test(tenantId || '') || !ID_RE.test(paymentId || '')) return page(404, 'missing');
-    const loaded = await loadTenant(tenantId);
-    if (!loaded || !loaded.tenant.demo) return page(404, 'missing'); // demo checkout never exists for real tenants
-
-    const payment = await demoPay.getPayment(paymentId);
-    if (!payment || payment.tenantId !== tenantId) return page(404, 'missing', null, loaded);
-    if (payment.status === 'paid') return page(200, 'paid', payment, loaded);
-    if (new Date(payment.expiresAt) <= now()) return page(410, 'expired', payment, loaded);
-    if (method !== 'POST') return page(200, 'form', payment, loaded);
-
-    const { rawBody, signature } = demoPay.signEvent(payment, 'succeeded', paymentSecret(tenantId));
-    const res = await handlePaymentWebhook({ tenantId, rawBody, headers: { 'x-signature': signature } });
-    if (res.status === 200 && res.body.ok) {
-      await demoPay.markPaid(paymentId);
-      return page(200, 'paid', payment, loaded);
-    }
-    return page(500, 'error', payment, loaded);
-  }
 
   // ---------- Public policy verification (the QR code on the PDF) ----------
 

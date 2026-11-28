@@ -1,5 +1,7 @@
 'use strict';
 
+const { formatDate, formatMoney } = require('../../../shared/format');
+
 const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
 const QRCode = require('qrcode');
 
@@ -84,13 +86,6 @@ function hexToRgb(hex) {
   return rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
 }
 
-const formatDate = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
-
-function formatMoney(amount, currency, lang) {
-  const [int, dec] = Number(amount).toFixed(2).split('.');
-  if (lang === 'en') return `${currency} ${int.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${dec}`;
-  return `${int.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')},${dec} ${currency}`;
-}
 
 /**
  * @param policy    record returned by PolicyAdminAdapter (draft fields + policyNumber)

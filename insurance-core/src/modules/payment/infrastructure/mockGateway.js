@@ -1,17 +1,17 @@
 'use strict';
 
-const { signPayload } = require('../payment/webhook');
+const { signPayload } = require('./webhookSignature');
 
 /**
- * PaymentAdapter interface (implement per provider: CMI, Stripe, a mobile-money gateway...):
+ * PaymentGateway port (implement per provider: CMI, Stripe, a mobile-money gateway...):
  *   createPaymentLink({ tenantId, caseId, amount, currency, description, expiresAt, idempotencyKey })
  *     -> Promise<{ paymentId, url, expiresAt, status }>
- * The provider then calls your webhook endpoint; see src/payment/webhook.js.
+ * The provider then calls the paymentWebhook function; see infrastructure/webhookSignature.js.
  *
  * The mock below never moves money. simulate() produces a signed webhook payload, so you can
  * demo "the customer paid" live and test the whole path with real signature verification.
  */
-function createMockPaymentAdapter({
+function createMockGateway({
   secret = 'demo-webhook-secret',
   baseUrl = 'https://pay.demo-insurer.example', // reserved .example domain: never resolves
   clock = () => new Date(),
@@ -51,4 +51,4 @@ function createMockPaymentAdapter({
   };
 }
 
-module.exports = { createMockPaymentAdapter };
+module.exports = { createMockGateway };

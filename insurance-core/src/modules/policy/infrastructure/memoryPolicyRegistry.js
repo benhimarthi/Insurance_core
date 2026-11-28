@@ -6,7 +6,7 @@
  *   getPolicy(tenantId, policyNumber) -> Promise<policy | null>
  * createPolicy MUST be idempotent on draft.idempotencyKey (payment webhooks get redelivered).
  */
-function createMockPolicyAdmin() {
+function createMemoryPolicyRegistry() {
   const byKey = new Map();
   const byNumber = new Map();
   const counters = new Map();
@@ -31,4 +31,4 @@ function createMockPolicyAdmin() {
   };
 }
 
-module.exports = { createMockPolicyAdmin };
+module.exports = { createMemoryPolicyRegistry };

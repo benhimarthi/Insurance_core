@@ -1,13 +1,12 @@
 'use strict';
 
-const { finalPremium } = require('../shared/cases');
+const { finalPremium } = require('../../../shared/cases');
 
 /**
  * Pure policy logic: no I/O. Decides what premium is charged, whether a case may be issued,
- * and builds the policy draft that a PolicyAdminAdapter turns into a real policy.
+ * and builds the policy draft that a PolicyRegistry turns into a real policy (finalPremium, the
+ * premium actually charged, comes from the shared case record).
  */
-
-/** Premium actually charged: the underwriter's adjustment if there is one, else the engine's. */
 
 /**
  * The hard rule: a policy is only ever issued for
@@ -49,7 +48,7 @@ function premiumParts(caseDoc, total) {
 /**
  * Builds the policy draft from verified data only: holder from the ID, vehicle from the
  * registration, premium from the final decision. The policy number is assigned later by the
- * PolicyAdminAdapter (the insurer's system owns numbering).
+ * PolicyRegistry (the insurer's system owns numbering).
  */
 function buildPolicyDraft({ caseDoc, config, now }) {
   const id = caseDoc.documents && caseDoc.documents.national_id;

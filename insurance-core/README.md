@@ -17,6 +17,7 @@ The code is being organised as feature modules following clean architecture: see
 | `src/modules/auth` | Auth module (clean architecture): roles, permissions, invitations, member management, audit of access changes |
 | `src/modules/conversation` | Conversation module: chat flow, questions, AI extractor, receiving messages, web chat (`webchat` function) |
 | `src/modules/underwriting` | Underwriting module: rules engine, review queue, cases, decisions, messages to customers (`underwriting` function) |
+| `src/modules/payment`, `src/modules/policy` | Payment links, provider webhooks, demo checkout; policy issuance, numbering, PDF |
 | `src/modules/tenants` | Tenants module: insurers (create, rename, suspend), their rules JSON (validated, versioned, restorable), the tenant loader |
 | `src/shared` | Shared kernel: errors, identifier formats, hashing helpers |
 | `src/server` | Framework-agnostic handlers, Firestore repository, outbox (not yet split into modules) |
@@ -142,6 +143,22 @@ reasons and premium breakdown, the documents with their checks, the contact and 
 - Opening photos needs the functions' service account (`<project-number>-compute@developer.gserviceaccount.com`) to
   hold **Service Account Token Creator** on itself (signed links).
 - `tenant_admin` sees cases but does not decide (separation of duties): decisions need an underwriter role.
+
+## Payment and policy
+After "oui", demo insurers get a link to the **demo checkout** (`https://<project>.web.app/pay/...`, no money moves):
+"Payer" signs the event a real provider would send and goes through the same webhook path. The amount must be exactly
+the one asked; the policy is then numbered (`POL-<prefix>-<year>-<seq>`), its PDF stored under `tenants/{t}/policies/`
+and sent in the chat (a 15-minute link). A redelivered or repeated payment never issues a second policy. Real insurers
+have no provider yet: their customers get "we are preparing your contract".
+
+One-time setup (`ENABLED_MODULES` contains `payment`):
+1. The webhook secret, in Cloud Shell:
+   `openssl rand -hex 32 | firebase functions:secrets:set PAYMENT_WEBHOOK_SECRET --data-file=- --project my-super-manager-app`
+2. The policy PDF link (and "Voir la photo") need **Service Account Token Creator** for
+   `<project-number>-compute@developer.gserviceaccount.com`.
+3. `DEMO_PAYMENTS=true` and `DEMO_PAY_BASE_URL=https://<project>.web.app/pay` are in `.env.<project>`.
+A real provider (CMI, Stripe...) is a PaymentGateway adapter in `src/modules/payment/infrastructure`, selected per
+insurer in `gatewaySelection.js`, with its webhook pointed at the `paymentWebhook` function.
 
 ## Run the tests
 `npm install && npm test` (no Firebase project or emulator needed: a strict Firestore double is used).
