@@ -1,6 +1,6 @@
 'use strict';
 
-const { createConversationModule, announceDecision, PAY } = require('../modules/conversation');
+const { createConversationModule, announceDecision, policyResentMessage, PAY } = require('../modules/conversation');
 const { createUnderwritingModule } = require('../modules/underwriting');
 const { createPolicyModule, isApprovedForIssuance, isoDate } = require('../modules/policy');
 const { createPaymentModule } = require('../modules/payment');
@@ -103,7 +103,7 @@ function buildApp({
     authorize: ({ caller, ...rest }) => authService.authorize({ auth: caller, ...rest }),
     store: repo,
     tenants: { load: loadTenant },
-    notifier: { announce: announceDecision },
+    notifier: { announce: announceDecision, policyResent: policyResentMessage },
     delivery: { send: deliver },
     files: storage,
     now,

@@ -16,6 +16,7 @@
  *
  * @typedef {object} DecisionNotifier  what the customer is told (customer texts belong to the conversation side)
  * @property {(args: {caseDoc, config}) => {caseDoc, replies: string[]}} announce
+ * @property {(args: {caseDoc}) => string} policyResent   the text sent with a policy document sent again
  *
  * @typedef {object} Delivery        optional: sends push-channel replies now (WhatsApp); web chat replies wait for the page
  * @property {(outboxEntries) => Promise<void>} send

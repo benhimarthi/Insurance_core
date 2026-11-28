@@ -114,6 +114,11 @@ const PAY = {
     en: `Payment received, thank you! Your policy ${num} is active from ${start} to ${end}. The document is attached.`,
     darija: `توصلنا بالخلاص، شكرا! العقد ديالك ${num} خدام من ${start} حتى ${end}. لقا الوثيقة فالمرفق.`,
   }, lang),
+  resent: (lang, num) => pick({
+    fr: `Voici à nouveau votre contrat ${num}.`,
+    en: `Here is your policy ${num} again.`,
+    darija: `ها هو العقد ديالك ${num} مرة أخرى.`,
+  }, lang),
   failed: (lang, url) => pick({
     fr: `Le paiement n’a pas abouti. Vous pouvez réessayer avec le même lien : ${url}`,
     en: `The payment did not go through. You can try again with the same link: ${url}`,

@@ -171,14 +171,23 @@ function createRepository(db, { now = () => new Date() } = {}) {
       return deleted;
     },
 
-    /** Web chat has no push channel: the client polls and receives queued messages in order. */
-    async takePendingWebMessages(tenantId, customerId) {
+    /** Web chat has no push channel: the client polls for queued messages, in order. */
+    async listPendingWebMessages(tenantId, customerId) {
       const snap = await db.collection('outbox')
         .where('tenantId', '==', tenantId)
         .where('customerId', '==', customerId)
         .where('status', '==', 'queued_web').get();
-      const entries = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort(byCreation);
-      for (const e of entries) await this.markOutbox(e.id, { status: 'sent', sentAt: now().toISOString() });
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort(byCreation);
+    },
+
+    /** Marks web messages delivered, once they were actually prepared for the page. */
+    async markWebMessagesSent(ids) {
+      for (const id of ids) await this.markOutbox(id, { status: 'sent', sentAt: now().toISOString() });
+    },
+
+    async takePendingWebMessages(tenantId, customerId) {
+      const entries = await this.listPendingWebMessages(tenantId, customerId);
+      await this.markWebMessagesSent(entries.map((e) => e.id));
       return entries;
     },
   };

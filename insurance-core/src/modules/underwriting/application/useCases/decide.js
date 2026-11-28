@@ -69,7 +69,32 @@ function makeCaseActions({ authorizer, store, tenants, notifier, delivery, logge
     return { ok: true };
   }
 
-  return { decide, messageCustomer };
+  /** Sends the policy PDF of an issued case to the customer again (e.g. they lost it, or it did not arrive). */
+  async function resendPolicy({ caller, tenantId, caseId, reason }) {
+    if (!TENANT_ID_RE.test(tenantId || '')) throw new AppError('invalid-argument', 'Invalid tenant.');
+    const { ctx } = await context({ caller, tenantId, caseId, reason });
+    const result = await store.transact({
+      tenantId, caseId,
+      compute: async ({ caseDoc }) => {
+        if (!caseDoc) throw new AppError('not-found', 'Case not found.');
+        if (!caseDoc.policy || !caseDoc.policy.pdfPath) throw new AppError('failed-precondition', 'NO_POLICY');
+        const { policyNumber, pdfPath } = caseDoc.policy;
+        const event = newEvent({ type: 'policy_resent', actor: { kind: ACTOR.HUMAN, id: ctx.uid }, payload: { role: ctx.role, policyNumber } });
+        return {
+          caseDoc,
+          events: [event],
+          outbox: [
+            { kind: 'text', text: notifier.policyResent({ caseDoc }) },
+            { kind: 'document', document: { path: pdfPath, filename: `${policyNumber}.pdf`, mimeType: 'application/pdf' } },
+          ],
+        };
+      },
+    });
+    await deliver(result.outbox);
+    return { ok: true };
+  }
+
+  return { decide, messageCustomer, resendPolicy };
 }
 
 module.exports = { makeCaseActions };

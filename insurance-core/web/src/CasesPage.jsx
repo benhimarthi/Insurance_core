@@ -108,6 +108,11 @@ function CaseDetail({ api, tenantId, caseId, lang, onBack, onChanged }) {
     const { url } = await api.documentLink(tenantId, caseId, docType);
     if (tab) tab.location = url; else window.location.assign(url);
   })();
+  const resend = () => run(async () => {
+    await api.resendPolicy(tenantId, caseId);
+    setNotice(x.resent);
+    await load();
+  })();
   const sendMessage = run(async (e) => {
     e.preventDefault();
     await api.message(tenantId, caseId, msg.trim());
@@ -155,6 +160,14 @@ function CaseDetail({ api, tenantId, caseId, lang, onBack, onChanged }) {
             </form>
           )}
           {!e && <p className="muted">{x.errors.CONVERSATION_NOT_FINISHED}</p>}
+        </div>
+      )}
+
+      {c.policy && (
+        <div className="card">
+          <h2>{x.policy}</h2>
+          <p><strong>{c.policy.policyNumber}</strong> · {c.policy.startDate} → {c.policy.endDate}</p>
+          {can('case:decide') && <button type="button" onClick={resend} disabled={busy}>{x.resend}</button>}
         </div>
       )}
 
