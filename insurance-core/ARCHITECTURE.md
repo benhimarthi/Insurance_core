@@ -102,14 +102,16 @@ src/modules/conversation/
     inbound.js                      upload limits and content check, web session format, when a case is finished
     limits.js                       abuse limits of the web chat (per session, IP, insurer)
     retention.js                    how long uploads and abandoned conversations are kept
+    detour.js                       questions and off-topic messages: insurer knowledge (no prices), answer checks, cap
   application/
-    ports.js                        Extractor, Underwriting, Documents, Payments, CaseStore, Uploads, TenantLoader, CustomerIds, Delivery
+    ports.js                        Extractor, Assistant, Underwriting, Documents, Payments, CaseStore, Uploads, TenantLoader, CustomerIds, Delivery
     flow.js                         makeFlow(ports): the conversation state machine
     useCases/handleInbound.js       one message from any channel: dedupe, uploads, flow, one atomic commit, then delivery
     useCases/webChat.js             the web chat: key, session, abuse limits, collect queued replies
     useCases/cleanup.js             nightly data retention
   infrastructure/
     extractors.js                   LLM extractor (Gemini) and the offline rule-based one
+    llmAssistant.js                 classifies a non-answer and answers questions from the insurer information
     hmacCustomerIds.js              pseudonymous customer ids (HMAC with PHONE_PEPPER)
     firestoreRateLimiter.js         fixed-window counters shared by all instances
   interface/

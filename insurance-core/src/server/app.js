@@ -24,7 +24,7 @@ const { TENANT_ID_RE, ID_RE, AppError } = require('./util');
  */
 
 function buildApp({
-  repo, loadTenant, channel, extractor, documentProcessor, paymentAdapter, policyAdmin, storage,
+  repo, loadTenant, channel, extractor, assistant = null, documentProcessor, paymentAdapter, policyAdmin, storage,
   paymentSecret, pepper, authService, demoPay = null, verifier = null, now = () => new Date(), logger = console,
 }) {
   const textEntry = (text) => ({ kind: 'text', text });
@@ -40,6 +40,7 @@ function buildApp({
   // Conversation module: receiving messages from any channel, and the web chat.
   const conversation = createConversationModule({
     extractor,
+    assistant,
     ...legacyConversationPorts({ documentProcessor, paymentAdapter }),
     store: repo,
     uploads: storage,

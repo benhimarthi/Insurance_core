@@ -4,15 +4,18 @@ const { CASE_STATUS, ACTOR, EVENT, newEvent, caseStatusFromEngine, finalPremium 
 const { QUESTIONS, getPath, setPath, validateValue, formatQuestion } = require('../domain/questions');
 const { MESSAGES, DOC, PAY, t, quoteMessage } = require('../domain/messages');
 const { detectLanguage, parseBoolean, wantsHuman } = require('../domain/nlu');
+const { MAX_DETOURS, sanitizeAnswer, insurerKnowledge } = require('../domain/detour');
 
 /**
  * Channel-agnostic conversation flow (WhatsApp, web chat, anything).
  *
- *   const handleMessage = makeFlow({ extractor, underwriting, documents, payments })
+ *   const handleMessage = makeFlow({ extractor, underwriting, documents, payments, assistant })
  *   handleMessage({ caseDoc, message, attachments, config, now }) -> { caseDoc, replies, events }
  *
  * What the flow needs from other modules comes through ports (application/ports.js): the rules
- * engine (underwriting), document checks (documents) and payment links (payments, optional).
+ * engine (underwriting), document checks (documents), payment links (payments, optional) and the
+ * assistant (optional), which answers questions and redirects off-topic messages before the flow
+ * asks its pending step again (see domain/detour.js).
  * It never touches Firestore or a messaging API: the caller persists caseDoc, appends events
  * to the audit trail and sends replies. That keeps the flow testable and channel-independent.
  *
@@ -23,6 +26,7 @@ const { detectLanguage, parseBoolean, wantsHuman } = require('../domain/nlu');
 
 const MAX_RETRIES = 3;
 const SYSTEM = { kind: ACTOR.SYSTEM, id: 'conversation-flow' };
+const DETOUR_STAGES = ['asking', 'documents', 'quoted']; // the steps where the assistant reads the customer's intent
 
 const nextQuestion = (input) => QUESTIONS.find((q) => getPath(input, q.path) == null);
 
@@ -91,8 +95,40 @@ function afterQuestions(ports, c, config, lang, replies, events) {
 }
 
 function makeFlow(ports) {
-  const { extractor, documents, payments = null } = ports;
+  const { extractor, documents, payments = null, assistant = null } = ports;
   if (!extractor || !ports.underwriting || !documents) throw new Error('makeFlow needs extractor, underwriting and documents ports.');
+
+  /**
+   * The message is not what the step expects. The assistant reads its INTENT:
+   *   human     the customer asks to talk to a person -> { handoff: true } (always honoured, even past the cap)
+   *   question  answered from the insurer's information -> { replies, event }, then the step is asked again
+   *   off_topic polite redirect -> { replies, event }
+   *   unclear   null: the usual re-ask (an advisor after 3 failed tries)
+   * Questions and off-topic messages never count as failed answers, but at most MAX_DETOURS in a row.
+   * If the assistant fails, a request for a human is still recognised from its words (fallback).
+   */
+  async function detour({ c, message, lang, config, stage, pendingQuestion }) {
+    if (!assistant || !String(message).trim()) return null;
+    let res;
+    try {
+      res = await assistant.respond({
+        message, language: lang, stage, pendingQuestion,
+        knowledge: insurerKnowledge(config, { language: lang, documentLabels: documents.requiredTypes(config).map((type) => documents.labelOf(type, lang)), paymentEnabled: !!payments }),
+      });
+    } catch {
+      return wantsHuman(message) ? { handoff: true } : null;
+    }
+    if (res && res.kind === 'human') return { handoff: true };
+    if ((c.flow.detours || 0) >= MAX_DETOURS) return null;
+    let reply = null;
+    if (res && res.kind === 'question') reply = sanitizeAnswer(res.answer);
+    else if (res && res.kind === 'off_topic') reply = t(MESSAGES.offTopic, lang);
+    if (!reply) return null;
+    c.flow.detours = (c.flow.detours || 0) + 1;
+    // the audit trail records that the customer went off the path, never what they wrote
+    const event = newEvent({ type: EVENT.CUSTOMER_QUESTION, actor: { kind: ACTOR.CUSTOMER, id: c.customerId || 'customer' }, payload: { kind: res.kind, stage } });
+    return { replies: [reply], event };
+  }
 
   return async function handleMessage({ caseDoc, message = '', attachments = [], config, now = new Date() }) {
     const c = structuredClone(caseDoc);
@@ -112,8 +148,12 @@ function makeFlow(ports) {
 
     const lang = c.language || 'fr';
 
-    // A customer can ask for a human at any point.
-    if (!['handoff', 'closed'].includes(c.flow.stage) && wantsHuman(message)) {
+    // A customer can ask for a human at any point. With an assistant, the steps that can detour
+    // (questions, documents, quote) read the intent instead of words: "une autre personne peut-elle
+    // conduire ?" is a question, not a request for an advisor. Elsewhere, and without an assistant,
+    // the words decide.
+    const intentByAssistant = !!assistant && DETOUR_STAGES.includes(c.flow.stage);
+    if (!['handoff', 'closed'].includes(c.flow.stage) && !intentByAssistant && wantsHuman(message)) {
       return handoff(c, 'customer_requested_human', lang, replies, events);
     }
 
@@ -139,6 +179,15 @@ function makeFlow(ports) {
         }
 
         if (getPath(c.input, q.path) == null) {
+          if (Object.keys(applied).length === 0) { // nothing usable: maybe a question, or off topic
+            const d = await detour({ c, message, lang, config, stage: 'asking', pendingQuestion: formatQuestion(q, lang) });
+            if (d && d.handoff) return handoff(c, 'customer_requested_human', lang, replies, events);
+            if (d) {
+              events.push(d.event);
+              replies.push(...d.replies, formatQuestion(q, lang));
+              return finish(c, replies, events);
+            }
+          }
           c.flow.retries += 1;
           if (c.flow.retries >= MAX_RETRIES) return handoff(c, 'conversation_stuck', lang, replies, events);
           replies.push(t(MESSAGES.retry, lang), formatQuestion(q, lang));
@@ -147,6 +196,7 @@ function makeFlow(ports) {
 
         events.push(newEvent({ type: EVENT.INPUT_UPDATED, actor: { kind: ACTOR.CUSTOMER, id: c.customerId || 'customer' }, payload: { fields: applied } }));
         c.flow.retries = 0;
+        c.flow.detours = 0;
 
         const nq = nextQuestion(c.input);
         if (nq) {
@@ -165,6 +215,9 @@ function makeFlow(ports) {
         c.documents = c.documents || {};
 
         if (!attachments.length) {
+          const d = await detour({ c, message, lang, config, stage: 'documents', pendingQuestion: DOC.request(lang, labels(missingTypes(c, config))) });
+          if (d && d.handoff) return handoff(c, 'customer_requested_human', lang, replies, events);
+          if (d) { events.push(d.event); replies.push(...d.replies); }
           replies.push(DOC.request(lang, labels(missingTypes(c, config))));
           return finish(c, replies, events);
         }
@@ -223,6 +276,9 @@ function makeFlow(ports) {
           events.push(newEvent({ type: EVENT.QUOTE_DECLINED_BY_CUSTOMER, actor: customer, payload: {} }));
           replies.push(t(MESSAGES.closed, lang));
         } else {
+          const d = await detour({ c, message, lang, config, stage: 'quoted', pendingQuestion: t(MESSAGES.quotedReprompt, lang) });
+          if (d && d.handoff) return handoff(c, 'customer_requested_human', lang, replies, events);
+          if (d) { events.push(d.event); replies.push(...d.replies); }
           replies.push(t(MESSAGES.quotedReprompt, lang));
         }
         return finish(c, replies, events);

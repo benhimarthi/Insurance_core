@@ -83,6 +83,18 @@ questions, documents, then a quote or a referral to an underwriter. Real insurer
 adds a "Demo documents" button (sample ID and registration, no real files needed).
 Without the payment module, an accepted quote ends with "we are preparing your contract": the insurer follows up.
 
+When a message is not an answer, the assistant (Gemini) steps in before the flow asks its step again:
+- **a question** about the insurance (coverages, documents, process): answered from the insurer's own information
+  only (`insurerKnowledge` in `domain/detour.js`: name, coverages and guarantees, documents, duration, process; never
+  prices). Answers containing an amount with a currency are refused, links are removed, length is capped;
+- **off topic**: a polite redirect;
+- **unclear**: re-asked as before; after 3 tries an advisor takes over;
+- **human**: the customer asks to talk to a person: handed to an advisor. Decided on the intent, not on words
+  ("can another person drive?" is a question). Always honoured, even past the detour cap. If the assistant fails,
+  the words decide again (fallback), so a request for an advisor is never lost.
+At most 5 detours in a row. Works during the questions, the documents and the quote. The audit trail records
+`customer_question` with the kind and the step, never the text.
+
 One-time setup before deploying it (`ENABLED_MODULES` contains `conversation`):
 1. Gemini API key: https://aistudio.google.com/apikey (same Google account), then in Cloud Shell:
    `firebase functions:secrets:set GEMINI_API_KEY --project my-super-manager-app`
