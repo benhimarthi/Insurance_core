@@ -131,3 +131,56 @@ test('LLM assistant: knowledge and message are fenced, the message is data, outp
   assert.deepStrictEqual(await reply('not json').respond(args), { kind: 'unclear' });
   assert.deepStrictEqual(await createLlmAssistant({ callModel: async () => { throw new Error('down'); } }).respond(args), { kind: 'unclear' });
 });
+
+// ---------- talking to a human: intent, not words ----------
+
+const byIntent = ({ message }) => {
+  if (/parler à un conseiller|passez-moi quelqu|rappeler/i.test(message)) return { kind: 'human' };
+  if (/personne peut conduire/i.test(message)) return { kind: 'question', answer: 'Oui, d’autres conducteurs peuvent être déclarés avec un conseiller.' };
+  return byMessage({ message });
+};
+
+test('"une autre personne peut conduire ?" is a question: answered, not handed to an advisor', async () => {
+  const { caseDoc, last } = await play(['Bonjour', 'Est-ce qu’une autre personne peut conduire ?'], scriptedAssistant(byIntent));
+  assert.strictEqual(caseDoc.flow.stage, 'asking');
+  assert.deepStrictEqual(last.replies, ['Oui, d’autres conducteurs peuvent être déclarés avec un conseiller.', 'Quel âge avez-vous ?']);
+});
+
+test('a real request for an advisor is honoured at every detour step, even past the detour cap', async () => {
+  for (const items of [
+    ['Bonjour', 'Je voudrais parler à un conseiller s’il vous plaît'],
+    [...FRENCH_ANSWERS, 'Passez-moi quelqu’un'],
+    [...FRENCH_ANSWERS, doc('demo_id_ok', 'demo_registration_ok'), 'Pouvez-vous me rappeler ?'],
+    ['Bonjour', ...Array(6).fill('C’est quoi tous risques ?'), 'Je veux parler à un conseiller'],
+  ]) {
+    const { caseDoc, last } = await play(items, scriptedAssistant(byIntent));
+    assert.strictEqual(caseDoc.flow.stage, 'handoff', items.at(-1));
+    assert.strictEqual(caseDoc.handoff.reason, 'customer_requested_human');
+    assert.deepStrictEqual(last.replies, ['Je vous mets en relation avec un conseiller qui va continuer avec vous.']);
+  }
+});
+
+test('if the assistant fails, a request for an advisor is still recognised from its words', async () => {
+  const { caseDoc } = await play(['Bonjour', 'je veux un conseiller'], scriptedAssistant(() => new Error('model down')));
+  assert.strictEqual(caseDoc.flow.stage, 'handoff');
+  const q = await play(['Hello', 'Can another person drive the car?'], scriptedAssistant(() => new Error('model down')));
+  assert.strictEqual(q.caseDoc.flow.stage, 'handoff', 'only when the assistant fails do words decide again (known limit of the fallback)');
+  const ok = await play(['Hello', 'Can another person drive the car?'], scriptedAssistant(() => ({ kind: 'question', answer: 'Other drivers can be declared with an advisor.' })));
+  assert.strictEqual(ok.caseDoc.flow.stage, 'asking', 'with the assistant working, the same sentence is answered');
+});
+
+test('with an assistant, words alone no longer trigger a handoff during the steps it reads', async () => {
+  const calls = [];
+  const a = scriptedAssistant((args) => { calls.push(args.message); return { kind: 'unclear' }; });
+  const { caseDoc } = await play(['Bonjour', 'agent'], a);
+  assert.strictEqual(caseDoc.flow.stage, 'asking', 'the assistant judged it unclear: re-asked, not handed off');
+  assert.deepStrictEqual(calls, ['agent']);
+});
+
+test('LLM assistant: the prompt explains intent with examples; "human" is a valid kind', async () => {
+  let prompt;
+  const a = createLlmAssistant({ callModel: async (p) => { prompt = p; return '{"kind":"human"}'; } });
+  assert.deepStrictEqual(await a.respond({ message: 'Passez-moi quelqu’un', language: 'fr', stage: 'asking', knowledge: '' }), { kind: 'human' });
+  assert.match(prompt, /INTENT/);
+  assert.match(prompt, /une autre personne peut-elle conduire \?" is a "question"/);
+});

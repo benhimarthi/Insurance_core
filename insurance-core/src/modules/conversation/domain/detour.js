@@ -11,7 +11,7 @@
 
 const MAX_DETOURS = 5;
 const MAX_ANSWER_CHARS = 600;
-const DETOUR_KINDS = Object.freeze(['question', 'off_topic', 'unclear']);
+const DETOUR_KINDS = Object.freeze(['human', 'question', 'off_topic', 'unclear']);
 const MONEY_RE = /\d[\d\s.,]*\s?(mad|dhs?|dirhams?|درهم|€|eur|euros?|\$|usd)(?![a-z])|(?<![a-z])(mad|dhs?|€|\$|usd)\s?\d/i;
 const URL_RE = /\b(?:https?:\/\/|www\.)\S+/gi;
 

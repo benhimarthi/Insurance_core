@@ -9,7 +9,7 @@
  * @property {(args: {message, language, question, questions}) => Promise<{fields: object}>} extract
  *
  * @typedef {object} Assistant          optional: answers questions and redirects off-topic messages (LLM)
- * @property {(args: {message, language, stage, pendingQuestion, knowledge}) => Promise<{kind: 'question'|'off_topic'|'unclear', answer?: string}>} respond
+ * @property {(args: {message, language, stage, pendingQuestion, knowledge}) => Promise<{kind: 'human'|'question'|'off_topic'|'unclear', answer?: string}>} respond
  *   knowledge is the insurer summary of domain/detour.js (no prices); the answer is checked before use
  *
  * @typedef {object} Underwriting       the rules engine

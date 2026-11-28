@@ -88,7 +88,10 @@ When a message is not an answer, the assistant (Gemini) steps in before the flow
   only (`insurerKnowledge` in `domain/detour.js`: name, coverages and guarantees, documents, duration, process; never
   prices). Answers containing an amount with a currency are refused, links are removed, length is capped;
 - **off topic**: a polite redirect;
-- **unclear**: re-asked as before; after 3 tries an advisor takes over.
+- **unclear**: re-asked as before; after 3 tries an advisor takes over;
+- **human**: the customer asks to talk to a person: handed to an advisor. Decided on the intent, not on words
+  ("can another person drive?" is a question). Always honoured, even past the detour cap. If the assistant fails,
+  the words decide again (fallback), so a request for an advisor is never lost.
 At most 5 detours in a row. Works during the questions, the documents and the quote. The audit trail records
 `customer_question` with the kind and the step, never the text.
 
