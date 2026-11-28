@@ -8,7 +8,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const { makeEnv, FRENCH_ANSWERS, img } = require('./serverHelpers');
-const { createVerifier, policyState, publicView, initials } = require('../src/verification/verification');
+const { createVerifier, policyState, publicView, initials } = require('../src/modules/verification');
 const { generatePolicyPdf } = require('../src/modules/policy');
 const config = require('../config/tenants/demo-insurer/motor.json');
 

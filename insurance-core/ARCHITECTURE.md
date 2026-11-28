@@ -56,7 +56,7 @@ code in; each future module will provide its port from its own `index.js`, and o
 | `documents` | planned | ID and registration checks (`src/documents`, document processor adapters) |
 | `payment` | **done** | payment links per insurer (demo checkout for demo insurers), signed provider webhooks, exact amount, idempotent; asks the policy module to issue. Functions `paymentWebhook`, `demoPay` (secret: `PAYMENT_WEBHOOK_SECRET`) |
 | `policy` | **done** | who may be issued, policy draft from verified data, numbering (registry), PDF, storage. No function of its own: used by payment |
-| `verification` | planned | public QR verification (`src/verification`) |
+| `verification` | **done** | the public page behind each policy's QR code: HMAC links checked before any read, initials only. Function `verify` (secret: `VERIFY_SECRET`); the issuing functions print the QR code |
 
 Until a feature is migrated, its code stays where it is and `src/server/app.js` keeps wiring it.
 Migrate one module at a time, keeping the existing tests green.
@@ -161,6 +161,17 @@ src/modules/policy/
 
 Customer texts (PAY) and the decision notice (`announceDecision`) belong to the conversation module; the payment
 module receives them as ports. Policies are stored under `tenants/{t}/policies/`, outside the `uploads/` retention.
+
+## The verification module
+
+```
+src/modules/verification/
+  index.js                          createVerificationModule({ verifier, tenants, policies }), createVerifier
+  domain/view.js                    what a link reveals (publicView, initials), policy state from dates, formats
+  application/useCases/verifyPolicy.js   code first, then insurer and policy; every failure is the same "not found"
+  infrastructure/hmacVerifier.js    unguessable codes (HMAC, 80 bits), constant-time check
+  interface/                        verifyPage.js (the page), http.js (page or JSON)
+```
 
 ## The tenants module
 
