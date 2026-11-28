@@ -184,8 +184,11 @@ insurer in `gatewaySelection.js`, with its webhook pointed at the `paymentWebhoo
 - Verify the WaSender media download and document sending (marked UNVERIFIED in `src/channels/whatsapp.js`).
 - Have a native speaker proofread the darija messages.
 
-## QR verification
-Each policy PDF carries a QR code (top right) and the printed link `{verify URL}/{tenantId}/{policyNumber}/{code}`.
+## QR verification (verification module)
+Each policy PDF carries a QR code (top right) and the printed link `https://<project>.web.app/v/{tenantId}/{policyNumber}/{code}`
+(`VERIFY_BASE_URL`; Hosting forwards `/v/**` to the `verify` function). One-time setup:
+`openssl rand -hex 32 | firebase functions:secrets:set VERIFY_SECRET --data-file=- --project my-super-manager-app`
+(never change it later: every printed QR code would stop working). Policies issued before verification was on have no QR code.
 - The `code` is an HMAC of tenant and policy number, so links cannot be guessed from sequential policy numbers.
 - The page is public and read-only. It shows the insurer, policy number, **initials** of the holder, the plate,
   the plan and the period, with a state: valid, expired, not yet in force or cancelled (set `status: 'cancelled'`

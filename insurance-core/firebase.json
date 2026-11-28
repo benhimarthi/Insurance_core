@@ -51,6 +51,13 @@
         }
       },
       {
+        "source": "/v/**",
+        "function": {
+          "functionId": "verify",
+          "region": "europe-west1"
+        }
+      },
+      {
         "source": "/chat/**",
         "destination": "/chat.html"
       },

@@ -2,13 +2,11 @@
 
 const { createConversationModule, announceDecision, policyResentMessage, PAY } = require('../modules/conversation');
 const { createUnderwritingModule } = require('../modules/underwriting');
-const { createPolicyModule, isApprovedForIssuance, isoDate } = require('../modules/policy');
+const { createPolicyModule, isApprovedForIssuance } = require('../modules/policy');
 const { createPaymentModule } = require('../modules/payment');
 const { legacyConversationPorts } = require('./conversationPorts');
 const { deliverOutbox } = require('./outbox');
-const { renderVerifyPage, VERIFY_HEADERS } = require('./verifyPage');
-const { publicView, POLICY_NUMBER_RE, CODE_RE } = require('../verification/verification');
-const { TENANT_ID_RE } = require('./util');
+const { createVerificationModule } = require('../modules/verification');
 
 /**
  * Framework-agnostic handlers. index.js adapts Express requests to these plain inputs, and the
@@ -123,27 +121,8 @@ function buildApp({
    * an unknown policy and a malformed link all give the same "not found" answer, and the code
    * is checked before any database read, so the endpoint cannot be used to probe policies.
    */
-  async function handleVerify({ tenantId, policyNumber, code, format = 'html', lang = 'fr' }) {
-    const asJson = format === 'json';
-    const notFound = () => (asJson
-      ? { status: 404, headers: { 'cache-control': 'no-store' }, body: { valid: false, state: 'not_found' } }
-      : { status: 404, headers: VERIFY_HEADERS, html: renderVerifyPage({ view: null, lang }) });
-
-    if (!verifier || !TENANT_ID_RE.test(tenantId || '') || !POLICY_NUMBER_RE.test(policyNumber || '') || !CODE_RE.test(code || '')) return notFound();
-    if (!verifier.check({ tenantId, policyNumber }, code)) return notFound();
-
-    const loaded = await loadTenant(tenantId);
-    if (!loaded) return notFound();
-    const policy = await policyAdmin.getPolicy(tenantId, policyNumber);
-    if (!policy) return notFound();
-
-    const view = publicView(policy, { tenant: loaded.tenant, today: isoDate(now()) });
-    if (asJson) return { status: 200, headers: { 'cache-control': 'no-store' }, body: view };
-
-    const info = loaded.config.coverageInfo && loaded.config.coverageInfo[policy.coverage];
-    const coverageLabel = info && (info.label[lang] || info.label.fr);
-    return { status: 200, headers: VERIFY_HEADERS, html: renderVerifyPage({ view, lang, coverageLabel }) };
-  }
+  const verification = createVerificationModule({ verifier, tenants: { load: loadTenant }, policies: policy, now });
+  const handleVerify = verification.handleVerify;
 
   // ---------- Scheduled retry ----------
 

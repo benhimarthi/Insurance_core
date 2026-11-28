@@ -1,7 +1,7 @@
 'use strict';
 
-const { escapeHtml } = require('../shared/format');
-// Same base as the demo checkout page: nothing loads but inline styles, no framing, no caching.
+const { escapeHtml } = require('../../../shared/format');
+// Nothing loads but inline styles, no framing, no caching.
 const SECURITY_HEADERS = {
   'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'",
   'x-frame-options': 'DENY',

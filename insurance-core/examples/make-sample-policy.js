@@ -9,7 +9,7 @@ const { legacyConversationPorts } = require('../src/server/conversationPorts');
 const { createMockDocumentProcessor } = require('../src/adapters/documentProcessor');
 const { createFileStorage } = require('../src/adapters/storage');
 const { newCase } = require('../src/shared/cases');
-const { createVerifier } = require('../src/verification/verification');
+const { createVerifier } = require('../src/modules/verification');
 
 (async () => {
   const now = new Date();

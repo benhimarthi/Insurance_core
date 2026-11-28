@@ -10,7 +10,7 @@ const { createMockExtractor } = require('../src/modules/conversation');
 const { createMockDocumentProcessor } = require('../src/adapters/documentProcessor');
 const { createDemoGateway } = require('../src/modules/payment');
 const { createFirestorePolicyRegistry } = require('../src/modules/policy');
-const { createVerifier } = require('../src/verification/verification');
+const { createVerifier } = require('../src/modules/verification');
 const { createAuthModule } = require('../src/modules/auth');
 
 const TENANT = 'demo-insurer';

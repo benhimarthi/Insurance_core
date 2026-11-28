@@ -37,6 +37,7 @@ const { legacyConversationPorts } = require('./src/server/conversationPorts');
 const { createUnderwritingModule } = require('./src/modules/underwriting');
 const { createPaymentModule, createDemoGateway, demoCheckoutForDemoInsurers } = require('./src/modules/payment');
 const { createPolicyModule, createFirestorePolicyRegistry, isApprovedForIssuance } = require('./src/modules/policy');
+const { createVerificationModule, createVerifier } = require('./src/modules/verification');
 const { announceDecision, policyResentMessage, PAY } = require('./src/modules/conversation');
 const { createRepository } = require('./src/server/repository');
 const { createGemini } = require('./src/adapters/gemini');
@@ -53,7 +54,8 @@ const REQUIRE_MFA = defineString('REQUIRE_MFA', { default: 'true' }); // needs I
  * Which modules this deployment defines functions for, from ENABLED_MODULES (comma separated, in
  * .env.<project>): `auth`, `tenants`, `conversation` (web chat), `underwriting` (review queue, decisions),
  * `payment` (provider webhook, demo checkout; issues policies through the policy module),
- * `app` (everything not yet split into modules: WhatsApp, verification), or `all` (the default).
+ * `verification` (the public page behind each policy's QR code),
+ * `app` (everything not yet split into modules: WhatsApp), or `all` (the default).
  * See src/server/enabledModules.js for why it also reads the .env file itself.
  * The Firebase CLI checks every secret index.js declares, even with `--only functions:<name>`, so a
  * module whose secrets do not exist yet must not be defined at all.
@@ -66,6 +68,7 @@ const moduleEnabled = (name) => ENABLED_MODULES.includes('all') || ENABLED_MODUL
 const SECRETS_OF = {
   conversation: ['GEMINI_API_KEY', 'PHONE_PEPPER'],
   payment: ['PAYMENT_WEBHOOK_SECRET'],
+  verification: ['VERIFY_SECRET'],
   app: ['WASENDER_API_KEY', 'WASENDER_WEBHOOK_SECRET', 'PAYMENT_WEBHOOK_SECRET', 'PHONE_PEPPER', 'GEMINI_API_KEY', 'VERIFY_SECRET'],
 };
 const SECRET = {};
@@ -89,13 +92,25 @@ const WEBCHAT_APP_CHECK = moduleEnabled('conversation') ? defineString('WEBCHAT_
 const PAYMENTS_PARAMS = ['conversation', 'payment', 'app'].some(moduleEnabled);
 const DEMO_PAYMENTS = PAYMENTS_PARAMS ? defineString('DEMO_PAYMENTS', { default: 'false' }) : null;
 const DEMO_PAY_BASE_URL = PAYMENTS_PARAMS ? defineString('DEMO_PAY_BASE_URL', { default: '' }) : null;
+// Where verification links point (Hosting /v, same site): printed as the QR code on each policy.
+const VERIFY_BASE_URL = ['verification', 'payment', 'app'].some(moduleEnabled) ? defineString('VERIFY_BASE_URL', { default: '' }) : null;
 const PARAM = moduleEnabled('app') ? {
   GEMINI_MODEL,
   DEMO_PAYMENTS,
   DEMO_PAY_BASE_URL,
   USE_LOCAL_TENANTS: defineString('USE_LOCAL_TENANTS', { default: 'false' }),
-  VERIFY_BASE_URL: defineString('VERIFY_BASE_URL', { default: '' }),
+  VERIFY_BASE_URL,
 } : null;
+
+/** The functions that issue policies print the QR code: they need VERIFY_SECRET when verification is on. */
+const issuingSecrets = () => [...secretsOf('payment'), ...(moduleEnabled('verification') ? secretsOf('verification') : [])];
+
+/** Verification links, built on first use only (the web chat creates payment links but never issues). */
+let verifierInstance;
+function verifier() {
+  if (!verifierInstance) verifierInstance = createVerifier({ secret: SECRET.VERIFY_SECRET.value(), baseUrl: VERIFY_BASE_URL.value() });
+  return verifierInstance;
+}
 
 // firebase-admin 14 has only the modular API (no admin.apps / admin.auth()). Look for the DEFAULT app
 // by name: firebase-functions creates its own named app ("__FIREBASE_FUNCTIONS_SDK__") when it verifies
@@ -136,7 +151,11 @@ function getPaymentModule() {
     const db = firestore();
     const tenants = { load: createTenantLoader({ db, localDir: null }) };
     const demoGateway = DEMO_PAYMENTS.value() === 'true' ? createDemoGateway({ db, baseUrl: DEMO_PAY_BASE_URL.value() }) : null;
-    const policy = createPolicyModule({ registry: createFirestorePolicyRegistry(db), files: createFirebaseStorage(bucket()) });
+    const policy = createPolicyModule({
+      registry: createFirestorePolicyRegistry(db),
+      files: createFirebaseStorage(bucket()),
+      verifier: moduleEnabled('verification') ? { url: (p) => verifier().url(p) } : null, // the QR code on the PDF
+    });
     paymentModule = createPaymentModule({
       store: createRepository(db),
       tenants,
@@ -196,6 +215,20 @@ function getUnderwritingModule() {
     });
   }
   return underwritingModule;
+}
+
+// Verification module: answers the QR code scans. Only VERIFY_SECRET.
+let verificationModule;
+function getVerificationModule() {
+  if (!verificationModule) {
+    const db = firestore();
+    verificationModule = createVerificationModule({
+      verifier: verifier(),
+      tenants: { load: createTenantLoader({ db, localDir: null }) },
+      policies: { getPolicy: (t, n) => createFirestorePolicyRegistry(db).getPolicy(t, n) },
+    });
+  }
+  return verificationModule;
 }
 
 /**
@@ -313,9 +346,9 @@ if (moduleEnabled('underwriting')) {
 // through Hosting: the demo checkout (demo insurers only).
 if (moduleEnabled('payment')) {
   const afterPrefix = (req, prefix) => { const s = segments(req); return s[0] === prefix ? s.slice(1) : s; };
-  exports.paymentWebhook = onRequest({ secrets: secretsOf('payment'), timeoutSeconds: 120, memory: '512MiB' },
+  exports.paymentWebhook = onRequest({ secrets: issuingSecrets(), timeoutSeconds: 120, memory: '512MiB' },
     respond(postOnly((req) => getPaymentModule().handlePaymentWebhook({ tenantId: segments(req)[0], rawBody: rawBodyOf(req), headers: req.headers }))));
-  exports.demoPay = onRequest({ secrets: secretsOf('payment'), timeoutSeconds: 120, memory: '512MiB' },
+  exports.demoPay = onRequest({ secrets: issuingSecrets(), timeoutSeconds: 120, memory: '512MiB' },
     respond((req) => {
       if (!['GET', 'POST'].includes(req.method)) return { status: 405, body: { error: 'method_not_allowed' } };
       const [tenantId, paymentId] = afterPrefix(req, 'pay');
@@ -323,17 +356,22 @@ if (moduleEnabled('payment')) {
     }));
 }
 
+// ---------- verification module: needs VERIFY_SECRET ----------
+// GET /v/{tenantId}/{policyNumber}/{code}[?lang=en][&format=json] through Hosting (or the function URL directly).
+// Public: Hosting caches nothing (no-store) and maxInstances stays low; add a rate limit for production.
+if (moduleEnabled('verification')) {
+  exports.verify = onRequest({ secrets: secretsOf('verification'), timeoutSeconds: 30, memory: '256MiB', maxInstances: 5 }, respond((req) => {
+    if (req.method !== 'GET') return { status: 405, body: { error: 'method_not_allowed' } };
+    const s = segments(req);
+    const [tenantId, policyNumber, code] = s[0] === 'v' ? s.slice(1) : s;
+    return getVerificationModule().handleVerify({ tenantId, policyNumber, code, format: req.query.format === 'json' ? 'json' : 'html', lang: req.query.lang === 'en' ? 'en' : 'fr' });
+  }));
+}
+
 // ---------- the rest of the app (not yet split into modules): needs every secret ----------
 if (moduleEnabled('app')) {
   exports.whatsappWebhook = onRequest({ secrets: SECRETS, timeoutSeconds: 120, memory: '512MiB' },
     respond(postOnly((req) => getApp().handleWhatsAppWebhook({ tenantId: segments(req)[0], headers: req.headers, body: req.body }))));
-
-  // Public QR verification. GET /{tenantId}/{policyNumber}/{code}[?lang=en][&format=json]
-  exports.verify = onRequest({ secrets: SECRETS, timeoutSeconds: 30, memory: '256MiB', maxInstances: 5 }, respond((req) => {
-    if (req.method !== 'GET') return { status: 405, body: { error: 'method_not_allowed' } };
-    const [tenantId, policyNumber, code] = segments(req);
-    return getApp().handleVerify({ tenantId, policyNumber, code, format: req.query.format === 'json' ? 'json' : 'html', lang: req.query.lang === 'en' ? 'en' : 'fr' });
-  }));
 
   exports.retryOutbox = onSchedule({ schedule: 'every 2 minutes', secrets: SECRETS, timeoutSeconds: 120 }, async () => {
     await getApp().retryOutbox();

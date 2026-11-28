@@ -188,12 +188,13 @@ test('index.js defines only the enabled modules (ENABLED_MODULES), so missing se
     }
   };
   assert.deepStrictEqual(load('auth'), ['members']);
-  assert.deepStrictEqual(load('app'), ['retryOutbox', 'verify', 'whatsappWebhook']);
+  assert.deepStrictEqual(load('app'), ['retryOutbox', 'whatsappWebhook']);
+  assert.deepStrictEqual(load('verification'), ['verify']);
   assert.deepStrictEqual(load('payment'), ['demoPay', 'paymentWebhook']);
   assert.deepStrictEqual(load('underwriting'), ['underwriting']);
   assert.deepStrictEqual(load('auth,tenants,conversation'), ['conversationCleanup', 'members', 'tenants', 'webchat']);
   assert.deepStrictEqual(load('auth,tenants'), ['members', 'tenants']);
-  assert.strictEqual(load('auth, tenants, conversation, underwriting, payment, app').length, 10);
+  assert.strictEqual(load('auth, tenants, conversation, underwriting, payment, verification, app').length, 10);
 });
 
 test('enabled modules: from the environment, else from .env.<project> (as during the CLI analysis), else all', () => {

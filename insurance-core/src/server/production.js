@@ -11,7 +11,7 @@ const { createLlmDocumentProcessor } = require('../adapters/documentProcessor');
 const { createDemoGateway } = require('../modules/payment');
 const { createFirestorePolicyRegistry } = require('../modules/policy');
 const { createFirebaseStorage } = require('../adapters/storage');
-const { createVerifier } = require('../verification/verification');
+const { createVerifier } = require('../modules/verification');
 const { createAuthModule } = require('../modules/auth');
 
 /**
