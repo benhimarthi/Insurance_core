@@ -109,3 +109,57 @@ test('underwriting callable rejects unknown actions', async () => {
   assert.strictEqual(await code(env.call({ action: 'deleteAll' })), 'invalid-argument:Unknown action.');
   assert.strictEqual(await code(env.app.handleUnderwriting({ auth: env.underwriter(), data: undefined })), 'invalid-argument:Unknown action.');
 });
+
+// ---------- policy delivery in the web chat ----------
+
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+
+/** A web chat customer who reaches an issued policy; the PDF link fails as long as `signingWorks` is false. */
+async function issuedWebCase(env, state) {
+  const realSign = env.storage.getSignedUrl.bind(env.storage);
+  env.storage.getSignedUrl = async (p, ttl) => { if (!state.signingWorks) throw new Error('signBlob permission denied'); return realSign(p, ttl); };
+  const web = (body) => env.app.handleWebChat({ tenantId: TENANT, headers: {}, body: { sessionId: 'sess-policy01', ...body } });
+  for (const text of FRENCH_ANSWERS) await web({ text });
+  const file = (demoFixture) => ({ mimeType: 'image/png', dataBase64: PNG, demoFixture });
+  await web({ text: '', attachments: [file('demo_id_ok'), file('demo_registration_ok')] });
+  await web({ text: 'oui' });
+  const c = env.cases().find((x) => x.channel === 'web');
+  await env.pay(c.payment.paymentId);
+  return { web, caseId: c.id };
+}
+
+test('the policy confirmation is never lost: if the PDF link cannot be made, the text arrives and the PDF follows later', async () => {
+  const env = setup();
+  const state = { signingWorks: false };
+  const { web } = await issuedWebCase(env, state);
+
+  const first = (await web({ poll: true })).body.messages;
+  assert.deepStrictEqual(first.map((m) => m.kind), ['text']);
+  assert.match(first[0].text, /Paiement reçu/);
+  assert.deepStrictEqual((await web({ poll: true })).body.messages, [], 'the text is not repeated');
+
+  state.signingWorks = true;                                                       // the permission was granted
+  const later = (await web({ poll: true })).body.messages;
+  assert.deepStrictEqual(later.map((m) => [m.kind, m.filename]), [['document', 'POL-DEMO-2026-000001.pdf']]);
+  assert.deepStrictEqual((await web({ poll: true })).body.messages, []);
+});
+
+test('an underwriter can send the policy again; only issued cases, only with case:decide; audited', async () => {
+  const env = setup();
+  const { web, caseId } = await issuedWebCase(env, { signingWorks: true });
+  await web({ poll: true });                                                       // the customer got it once
+
+  assert.strictEqual(await code(env.call({ action: 'resendPolicy', caseId }, env.user('aud-1'))), 'permission-denied:FORBIDDEN');
+  assert.deepStrictEqual(await env.call({ action: 'resendPolicy', caseId }), { ok: true });
+  const again = (await web({ poll: true })).body.messages;
+  assert.deepStrictEqual(again.map((m) => m.kind), ['text', 'document']);
+  assert.strictEqual(again[0].text, 'Voici à nouveau votre contrat POL-DEMO-2026-000001.');
+  const ev = env.db.list(`tenants/${TENANT}/cases/${caseId}/events`).find((e) => e.type === 'policy_resent');
+  assert.deepStrictEqual(ev.payload, { role: 'underwriter', policyNumber: 'POL-DEMO-2026-000001' });
+
+  assert.strictEqual((await env.call({ action: 'get', caseId })).policy.policyNumber, 'POL-DEMO-2026-000001');
+
+  const other = setup();
+  const referred = await referredCase(other);
+  assert.strictEqual(await code(other.call({ action: 'resendPolicy', caseId: referred.id })), 'failed-precondition:NO_POLICY');
+});

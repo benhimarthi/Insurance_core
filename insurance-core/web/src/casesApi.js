@@ -10,6 +10,7 @@ export function createCasesApi({ call }) {
     documentLink: (tenantId, caseId, docType) => u(tenantId, { action: 'documentLink', caseId, docType }),
     decide: (tenantId, { caseId, decision, adjustedPremium, note }) => u(tenantId, { action: 'decide', caseId, decision, adjustedPremium, note }),
     message: (tenantId, caseId, text) => u(tenantId, { action: 'message', caseId, text }),
+    resendPolicy: (tenantId, caseId) => u(tenantId, { action: 'resendPolicy', caseId }),
   };
 }
 

@@ -37,7 +37,7 @@ const { legacyConversationPorts } = require('./src/server/conversationPorts');
 const { createUnderwritingModule } = require('./src/modules/underwriting');
 const { createPaymentModule, createDemoGateway, demoCheckoutForDemoInsurers } = require('./src/modules/payment');
 const { createPolicyModule, createFirestorePolicyRegistry, isApprovedForIssuance } = require('./src/modules/policy');
-const { announceDecision, PAY } = require('./src/modules/conversation');
+const { announceDecision, policyResentMessage, PAY } = require('./src/modules/conversation');
 const { createRepository } = require('./src/server/repository');
 const { createGemini } = require('./src/adapters/gemini');
 const { createLlmDocumentProcessor, createMockDocumentProcessor } = require('./src/adapters/documentProcessor');
@@ -191,7 +191,7 @@ function getUnderwritingModule() {
       authorize: ({ caller, ...rest }) => auth.authorize({ auth: caller, ...rest }),
       store: createRepository(db),
       tenants: { load: createTenantLoader({ db, localDir: null }) },
-      notifier: { announce: announceDecision },
+      notifier: { announce: announceDecision, policyResent: policyResentMessage },
       files: createFirebaseStorage(bucket()),
     });
   }

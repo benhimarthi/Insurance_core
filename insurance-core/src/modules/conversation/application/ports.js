@@ -32,7 +32,8 @@
  * @property {(tenantId, caseId) => Promise<object|null>} getCase
  * @property {(args: {tenantId, caseId, customerId, dedupe, compute}) => Promise<{duplicate, caseDoc?, outbox?}>} transact
  *   optimistic: compute() runs outside the transaction, the commit re-checks the case version
- * @property {(tenantId, customerId) => Promise<object[]>} takePendingWebMessages
+ * @property {(tenantId, customerId) => Promise<object[]>} listPendingWebMessages   queued web chat replies, in order
+ * @property {(ids: string[]) => Promise<void>} markWebMessagesSent                  only after they were prepared
  * @property {(args: {updatedBefore: string, stages: string[], limit: number}) => Promise<Array<{tenantId, caseId}>>} deleteAbandonedCases
  *   deletes those cases, their audit events and the customer record pointing to them
  *

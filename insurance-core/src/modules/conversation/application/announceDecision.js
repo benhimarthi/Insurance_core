@@ -25,4 +25,7 @@ function announceDecision({ caseDoc, config }) {
   return { caseDoc: c, replies, events: [] };
 }
 
-module.exports = { announceDecision };
+/** The text that goes with a policy sent again by the insurer (the document follows). */
+const policyResentMessage = ({ caseDoc }) => PAY.resent(caseDoc.language || 'fr', caseDoc.policy.policyNumber);
+
+module.exports = { announceDecision, policyResentMessage };
